@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Harmoniq - Piano Assistant</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>Harmoniq</h1>
+            <p>Your Interactive Piano Assistant</p>
+        </header>
+
+        <main>
+            <div class="piano-container">
+                <div id="piano" class="piano"></div>
+                <div id="chord-display" class="chord-display">
+                    <h2>Current Chord</h2>
+                    <div id="current-chord">No chord detected</div>
+                </div>
+            </div>
+
+            <div class="timeline-container">
+                <h2>Timeline</h2>
+                <div id="chord-timeline" class="chord-timeline"></div>
+            </div>
+
+            <div class="favorites-container">
+                <h2>Favorites</h2>
+                <div id="favorites-list" class="favorites-list"></div>
+            </div>
+        </main>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="js/piano.js"></script>
+    <script src="js/chord-detector.js"></script>
+    <script src="js/timeline.js"></script>
+    <script src="js/favorites.js"></script>
+</body>
+
+</html>
