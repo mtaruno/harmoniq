@@ -21,7 +21,6 @@ There is a huge passionate community of composers and aspiring pianists on YouTu
    - Example: Die with a Smile by Bruno Mars (Imaj7 -> IVmaj7 -> Imaj7 -> iii7)
    - Next Step: This favorites list can do something like "Bruno Mars would often use this chord progression"! 
 
-
 ## Database 
 
 Store favorites songs list per user. We also would like there to be 
@@ -144,3 +143,6 @@ harmoniq/
   - Deploy to VPS with Nginx
   - Complete user documentation
   - Prepare for public release
+
+### Contact Information
+mtaruno@uw.edu
