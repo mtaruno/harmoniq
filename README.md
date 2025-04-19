@@ -107,6 +107,10 @@ harmoniq/
 - Initial HTML template with basic styling
 - Development scripts for building and running the application
 
+A screenshot of what the 'homepage' looks like currently:
+![CleanShot 2025-04-18 at 23 03 33@2x](https://github.com/user-attachments/assets/e5024042-98ae-4bbb-a5d8-ed4a7f03261d)
+
+
 ### Running the Application
 
 1. **Prerequisites**
