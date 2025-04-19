@@ -48,10 +48,21 @@ For this project, in terms of development, I would like to use sort of a minimal
 git clone https://github.com/mtaruno/harmoniq.git
 cd harmoniq
 ```
+
 2. Install dependencies
 ```bash
 npm install
 ```
+
+Note: Since this is a Node.js/TypeScript project, we don't use virtual environments. Rather the dependencies are managed through `package.json`. If you need a clean development environment, you can:
+```bash
+# Remove existing dependencies
+rm -rf node_modules package-lock.json
+
+# Reinstall dependencies
+npm install
+```
+
 3. Build the project
 ```bash
 npm run build
@@ -85,6 +96,56 @@ harmoniq/
 ├── package.json           # Project configuration
 └── tsconfig.json          # TypeScript configuration
 ```
+
+
+
+## Progress
+
+### Current Implementation Status (as of April 18, 2024)
+- Basic project structure and development environment setup
+- Express.js server with TypeScript configuration
+- Initial HTML template with basic styling
+- Development scripts for building and running the application
+
+### Running the Application
+
+1. **Prerequisites**
+   - Node.js (v16 or higher)
+   - npm (Node Package Manager)
+
+2. **Installation**
+   ```bash
+   # Clone the repository
+   git clone https://github.com/mtaruno/harmoniq.git
+   cd harmoniq
+
+   # Install dependencies
+   npm install
+   ```
+
+3. **Development Mode**
+   ```bash
+   # Start the development server with hot reloading
+   npm run dev
+   ```
+   The application will be available at `http://localhost:3000`
+
+It will try to connect to your keyboard, and you can play a chord and it will display it! 
+
+4. **Production Build**
+   ```bash
+   # Build the TypeScript files
+   npm run build
+
+   # Start the production server
+   npm start
+   ```
+
+### Next Steps
+- Implement interactive piano keyboard interface
+- Add real-time chord detection
+- Create timeline view for chord progression
+- Develop favorites system
 
 ## Development Timeline
 

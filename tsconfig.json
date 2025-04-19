@@ -1,10 +1,10 @@
 {
     "compilerOptions": {
         "target": "ES2020",
-        "module": "ES2020",
-        "moduleResolution": "bundler",
-        "outDir": "./public/js",
-        "rootDir": "./public/js",
+        "module": "CommonJS",
+        "moduleResolution": "node",
+        "outDir": "./dist",
+        "rootDir": "./src",
         "strict": true,
         "esModuleInterop": true,
         "skipLibCheck": true,
@@ -21,7 +21,7 @@
         "checkJs": false
     },
     "include": [
-        "public/js/**/*"
+        "src/**/*"
     ],
     "exclude": [
         "node_modules",
