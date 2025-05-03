@@ -1,7 +1,4 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.Timeline = void 0;
-class Timeline {
+export class Timeline {
     constructor() {
         this.chords = [];
         this.maxChords = 20; // Maximum number of chords to display
@@ -39,5 +36,4 @@ class Timeline {
         this.updateDisplay();
     }
 }
-exports.Timeline = Timeline;
 //# sourceMappingURL=timeline.js.map

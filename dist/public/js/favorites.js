@@ -1,7 +1,4 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.Favorites = void 0;
-class Favorites {
+export class Favorites {
     constructor() {
         this.favorites = [];
         this.favoritesList = document.getElementById('favorites-list');
@@ -64,7 +61,6 @@ class Favorites {
         });
     }
 }
-exports.Favorites = Favorites;
 // Initialize favorites when the page loads
 document.addEventListener('DOMContentLoaded', () => {
     new Favorites();

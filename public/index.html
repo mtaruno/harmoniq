@@ -4,13 +4,56 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MIDI Piano Visualizer</title>
+    <title>Harmoniq - Interactive Piano Assistant</title>
     <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #eee;
+        }
+
+        h1 {
+            margin: 0;
+            color: #2196F3;
+            font-size: 2.5em;
+            letter-spacing: -0.5px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin: 5px 0 0;
+            font-size: 1.1em;
+        }
+
         #piano {
             display: flex;
-            margin: 50px auto;
+            margin: 30px auto;
             width: 800px;
             position: relative;
+            min-height: 150px;
+            justify-content: center;
+            border: 1px solid #ddd;
+            padding: 10px;
+            border-radius: 8px;
+            background-color: #f9f9f9;
         }
 
         .key {
@@ -42,8 +85,22 @@
 
         #current-chord {
             text-align: center;
-            font-size: 24px;
-            margin: 20px;
+            font-size: 28px;
+            margin: 25px auto;
+            font-weight: bold;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 8px;
+            max-width: 400px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+            transition: all 0.3s ease;
+        }
+
+        #current-chord.playing {
+            background-color: #e3f2fd;
+            color: #0b7dda;
+            box-shadow: 0 2px 8px rgba(33, 150, 243, 0.3);
+            transform: scale(1.05);
         }
 
         #timeline {
@@ -52,22 +109,588 @@
             padding: 10px;
             border: 1px solid #ccc;
             min-height: 100px;
+            border-radius: 4px;
+        }
+
+        .status-indicator {
+            padding: 10px 15px;
+            border-radius: 6px;
+            display: inline-block;
+            margin-bottom: 15px;
+            font-weight: bold;
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            border-left: 4px solid #721c24;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        }
+
+        .status-indicator.connected {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            border-left: 4px solid #155724;
+        }
+
+        #midi-devices-container {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background-color: #f9f9f9;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+        }
+
+        #midi-devices-container h3 {
+            margin-top: 0;
+            margin-bottom: 15px;
+            color: #2196F3;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+
+        .midi-device {
+            padding: 12px 15px;
+            margin: 8px 0;
+            background-color: white;
+            border-radius: 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-left: 4px solid #ccc;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+            transition: all 0.2s ease;
+        }
+
+        .midi-device:hover {
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            transform: translateY(-1px);
+        }
+
+        .midi-device.active {
+            background-color: #e3f2fd;
+            border-left: 4px solid #2196F3;
+        }
+
+        .midi-device-name {
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+
+        .midi-device-info {
+            color: #666;
+            font-size: 0.85em;
+            margin-top: 3px;
+        }
+
+        .select-device-btn {
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+
+        .select-device-btn:hover {
+            background-color: #0b7dda;
+            transform: translateY(-1px);
+        }
+
+        /* Timeline styles */
+        #timeline {
+            width: 800px;
+            margin: 20px auto;
+            padding: 20px;
+            border: 2px solid #2196F3;
+            border-radius: 8px;
+            background-color: #f9f9f9;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+            min-height: 300px;
+            display: block !important;
+            position: relative;
+            z-index: 10;
+        }
+
+        /* Make sure the chord list is visible */
+        #chord-list {
+            min-height: 100px;
+            margin-top: 15px;
+            margin-bottom: 15px;
+        }
+
+        .timeline-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 10px;
+        }
+
+        #timeline h3,
+        #timeline h4 {
+            margin: 0;
+            color: #333;
+        }
+
+        #timeline h4 {
+            margin-top: 20px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .timeline-controls {
+            display: flex;
+            gap: 8px;
+        }
+
+        .timeline-chord {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            margin: 8px 0;
+            background-color: white;
+            border-radius: 6px;
+            border-left: 4px solid #ccc;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+            transition: all 0.2s ease;
+        }
+
+        .timeline-chord:hover {
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            transform: translateY(-1px);
+        }
+
+        .timeline-chord.latest {
+            border-left: 4px solid #4CAF50;
+            background-color: #e8f5e9;
+        }
+
+        .timeline-chord.playing {
+            border-left: 4px solid #2196F3;
+            background-color: #e3f2fd;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(33, 150, 243, 0.4);
+            }
+
+            70% {
+                box-shadow: 0 0 0 10px rgba(33, 150, 243, 0);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(33, 150, 243, 0);
+            }
+        }
+
+        .chord-name {
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+
+        .chord-time {
+            color: #666;
+            font-size: 0.85em;
+        }
+
+        .chord-actions {
+            display: flex;
+            gap: 5px;
+        }
+
+        .empty-message {
+            color: #999;
+            font-style: italic;
+            text-align: center;
+            padding: 20px;
+            background-color: #f5f5f5;
+            border-radius: 6px;
+            margin: 10px 0;
+        }
+
+        .error-message {
+            color: #721c24;
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            padding: 15px;
+            border-radius: 6px;
+            text-align: center;
+            margin: 10px 0;
+        }
+
+        /* Saved progressions styles */
+        .saved-progressions {
+            margin-top: 30px;
+        }
+
+        .saved-progression {
+            background-color: white;
+            border-radius: 6px;
+            padding: 12px 15px;
+            margin: 10px 0;
+            border-left: 4px solid #9c27b0;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        }
+
+        .progression-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+        }
+
+        .progression-name {
+            font-weight: bold;
+            color: #333;
+        }
+
+        .progression-date {
+            color: #666;
+            font-size: 0.85em;
+        }
+
+        .progression-chords {
+            color: #555;
+            margin: 8px 0;
+            padding: 8px;
+            background-color: #f5f5f5;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+
+        .progression-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        /* Button styles */
+        .btn {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .btn:hover {
+            background-color: #45a049;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn:disabled {
+            background-color: #cccccc;
+            color: #666666;
+            cursor: not-allowed;
+        }
+
+        .btn-play {
+            background-color: #2196F3;
+        }
+
+        .btn-play:hover {
+            background-color: #0b7dda;
+        }
+
+        .btn-play.playing {
+            background-color: #f44336;
+        }
+
+        .btn-save {
+            background-color: #9c27b0;
+        }
+
+        .btn-save:hover {
+            background-color: #7B1FA2;
+        }
+
+        .btn-clear {
+            background-color: #f44336;
+        }
+
+        .btn-clear:hover {
+            background-color: #d32f2f;
+        }
+
+        .btn-small {
+            padding: 4px 8px;
+            font-size: 0.8em;
+            background-color: #e0e0e0;
+            color: #333;
+            border-radius: 3px;
+        }
+
+        .btn-small:hover {
+            background-color: #d0d0d0;
+        }
+
+        .play-chord {
+            background-color: #2196F3;
+            color: white;
+        }
+
+        .play-chord:hover {
+            background-color: #0b7dda;
+        }
+
+        .remove-chord {
+            background-color: #f44336;
+            color: white;
+        }
+
+        .remove-chord:hover {
+            background-color: #d32f2f;
+        }
+
+        .load-progression {
+            background-color: #2196F3;
+            color: white;
+        }
+
+        .delete-progression {
+            background-color: #f44336;
+            color: white;
+        }
+
+        /* Status indicator styles */
+        .status-indicator.pending {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeeba;
+        }
+
+        /* Responsive styles */
+        @media (max-width: 900px) {
+
+            .container,
+            #piano,
+            #timeline {
+                width: 100%;
+            }
+
+            #piano {
+                overflow-x: auto;
+            }
         }
     </style>
 </head>
 
 <body>
-    <div id="piano"></div>
-    <div id="current-chord">No chord detected</div>
-    <div id="timeline"></div>
+    <div class="container">
+        <!-- MIDI status elements -->
+        <div id="midi-status" class="status-indicator">MIDI: Not Connected</div>
+        <div id="midi-devices-container">
+            <h3>MIDI Devices</h3>
+            <div id="midi-devices-list">No MIDI devices detected</div>
+        </div>
+
+        <!-- Main application elements -->
+        <header>
+            <h1>Harmoniq</h1>
+            <p class="subtitle">Interactive Piano Assistant</p>
+        </header>
+
+        <div id="piano-container"
+            style="margin: 30px auto; width: 100%; max-width: 800px; background-color: #f0f0f0; border-radius: 8px; padding: 15px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);">
+            <div id="piano" style="position: relative; height: 200px; display: flex; width: 100%;">
+                <!-- White keys will be added here by JavaScript -->
+                <div id="white-keys" style="display: flex; height: 100%; width: 100%; position: relative; z-index: 1;">
+                    <!-- Fallback white keys in case JavaScript fails -->
+                    <div class="key white"
+                        style="flex: 1; height: 100%; background-color: white; border: 1px solid #ccc; border-radius: 0 0 5px 5px; margin: 0 1px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 10px;">
+                        C3</div>
+                    <div class="key white"
+                        style="flex: 1; height: 100%; background-color: white; border: 1px solid #ccc; border-radius: 0 0 5px 5px; margin: 0 1px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 10px;">
+                        D3</div>
+                    <div class="key white"
+                        style="flex: 1; height: 100%; background-color: white; border: 1px solid #ccc; border-radius: 0 0 5px 5px; margin: 0 1px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 10px;">
+                        E3</div>
+                    <div class="key white"
+                        style="flex: 1; height: 100%; background-color: white; border: 1px solid #ccc; border-radius: 0 0 5px 5px; margin: 0 1px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 10px;">
+                        F3</div>
+                    <div class="key white"
+                        style="flex: 1; height: 100%; background-color: white; border: 1px solid #ccc; border-radius: 0 0 5px 5px; margin: 0 1px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 10px;">
+                        G3</div>
+                    <div class="key white"
+                        style="flex: 1; height: 100%; background-color: white; border: 1px solid #ccc; border-radius: 0 0 5px 5px; margin: 0 1px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 10px;">
+                        A3</div>
+                    <div class="key white"
+                        style="flex: 1; height: 100%; background-color: white; border: 1px solid #ccc; border-radius: 0 0 5px 5px; margin: 0 1px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 10px;">
+                        B3</div>
+                    <div class="key white"
+                        style="flex: 1; height: 100%; background-color: white; border: 1px solid #ccc; border-radius: 0 0 5px 5px; margin: 0 1px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 10px;">
+                        C4</div>
+                    <div class="key white"
+                        style="flex: 1; height: 100%; background-color: white; border: 1px solid #ccc; border-radius: 0 0 5px 5px; margin: 0 1px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 10px;">
+                        D4</div>
+                    <div class="key white"
+                        style="flex: 1; height: 100%; background-color: white; border: 1px solid #ccc; border-radius: 0 0 5px 5px; margin: 0 1px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 10px;">
+                        E4</div>
+                    <div class="key white"
+                        style="flex: 1; height: 100%; background-color: white; border: 1px solid #ccc; border-radius: 0 0 5px 5px; margin: 0 1px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 10px;">
+                        F4</div>
+                    <div class="key white"
+                        style="flex: 1; height: 100%; background-color: white; border: 1px solid #ccc; border-radius: 0 0 5px 5px; margin: 0 1px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 10px;">
+                        G4</div>
+                    <div class="key white"
+                        style="flex: 1; height: 100%; background-color: white; border: 1px solid #ccc; border-radius: 0 0 5px 5px; margin: 0 1px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 10px;">
+                        A4</div>
+                    <div class="key white"
+                        style="flex: 1; height: 100%; background-color: white; border: 1px solid #ccc; border-radius: 0 0 5px 5px; margin: 0 1px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 10px;">
+                        B4</div>
+                    <div class="key white"
+                        style="flex: 1; height: 100%; background-color: white; border: 1px solid #ccc; border-radius: 0 0 5px 5px; margin: 0 1px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 10px;">
+                        C5</div>
+                </div>
+
+                <!-- Black keys will be positioned absolutely on top -->
+                <div id="black-keys" style="position: absolute; top: 0; left: 0; width: 100%; height: 65%; z-index: 2;">
+                    <!-- Fallback black keys in case JavaScript fails -->
+                    <div class="key black"
+                        style="width: 24px; height: 100%; background-color: black; position: absolute; left: 5%; z-index: 2; border-radius: 0 0 3px 3px; color: white; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 5px; font-size: 10px;">
+                        C#3</div>
+                    <div class="key black"
+                        style="width: 24px; height: 100%; background-color: black; position: absolute; left: 12%; z-index: 2; border-radius: 0 0 3px 3px; color: white; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 5px; font-size: 10px;">
+                        D#3</div>
+                    <div class="key black"
+                        style="width: 24px; height: 100%; background-color: black; position: absolute; left: 25%; z-index: 2; border-radius: 0 0 3px 3px; color: white; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 5px; font-size: 10px;">
+                        F#3</div>
+                    <div class="key black"
+                        style="width: 24px; height: 100%; background-color: black; position: absolute; left: 32%; z-index: 2; border-radius: 0 0 3px 3px; color: white; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 5px; font-size: 10px;">
+                        G#3</div>
+                    <div class="key black"
+                        style="width: 24px; height: 100%; background-color: black; position: absolute; left: 39%; z-index: 2; border-radius: 0 0 3px 3px; color: white; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 5px; font-size: 10px;">
+                        A#3</div>
+                    <div class="key black"
+                        style="width: 24px; height: 100%; background-color: black; position: absolute; left: 52%; z-index: 2; border-radius: 0 0 3px 3px; color: white; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 5px; font-size: 10px;">
+                        C#4</div>
+                    <div class="key black"
+                        style="width: 24px; height: 100%; background-color: black; position: absolute; left: 59%; z-index: 2; border-radius: 0 0 3px 3px; color: white; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 5px; font-size: 10px;">
+                        D#4</div>
+                    <div class="key black"
+                        style="width: 24px; height: 100%; background-color: black; position: absolute; left: 72%; z-index: 2; border-radius: 0 0 3px 3px; color: white; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 5px; font-size: 10px;">
+                        F#4</div>
+                    <div class="key black"
+                        style="width: 24px; height: 100%; background-color: black; position: absolute; left: 79%; z-index: 2; border-radius: 0 0 3px 3px; color: white; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 5px; font-size: 10px;">
+                        G#4</div>
+                    <div class="key black"
+                        style="width: 24px; height: 100%; background-color: black; position: absolute; left: 86%; z-index: 2; border-radius: 0 0 3px 3px; color: white; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 5px; font-size: 10px;">
+                        A#4</div>
+                </div>
+            </div>
+        </div>
+        <div id="current-chord">No chord detected</div>
+        <div id="timeline">
+            <div class="timeline-header">
+                <h3>Timeline</h3>
+                <div class="timeline-controls">
+                    <button id="play-timeline" class="btn btn-play" title="Play chord progression">▶ Play</button>
+                    <button id="save-timeline" class="btn btn-save" title="Save chord progression">💾 Save</button>
+                    <button id="clear-timeline" class="btn btn-clear" title="Clear history">🗑️ Clear</button>
+                </div>
+            </div>
+            <div id="chord-list">
+                <div class="empty-message">No chords played yet</div>
+            </div>
+            <div id="saved-progressions" class="saved-progressions">
+                <h4>Saved Progressions</h4>
+                <div id="saved-list">
+                    <div class="empty-message">No saved progressions</div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <script type="module">
         import { Piano } from './js/piano.js';
         import { MIDIVisualizer } from './js/midi-visualizer.js';
+        import { Timeline } from './js/timeline.js';
+        import eventBus from './js/event-bus.js';
 
         document.addEventListener('DOMContentLoaded', () => {
+            console.log('DOM content loaded, initializing application');
+
+            // Initialize the timeline first (so it can listen for events)
+            const timeline = Timeline.getInstance();
+
+            // Initialize the piano
             const piano = new Piano();
+
+            // Initialize MIDI
             new MIDIVisualizer(piano);
+
+            // Debug: Log when chords are detected
+            eventBus.subscribeToChordDetected((event) => {
+                console.log('Main: Chord detected event received:', event);
+            });
+
+            // Debug: Log when notes are activated
+            eventBus.subscribeToNoteActivated((event) => {
+                console.log('Main: Note activated event received:', event);
+            });
+
+            // Debug: Log MIDI status changes
+            eventBus.subscribeToMIDIStatus((event) => {
+                console.log('Main: MIDI status event received:', event);
+
+                // Update UI elements based on MIDI status
+                const statusElement = document.getElementById('midi-status');
+                if (statusElement) {
+                    if (event.status === 'connected') {
+                        statusElement.style.display = 'block';
+                        statusElement.textContent = event.message || 'MIDI: Connected';
+                        statusElement.className = 'status-indicator connected';
+                    } else if (event.status === 'error') {
+                        statusElement.style.display = 'block';
+                        statusElement.textContent = event.message || 'MIDI: Error';
+                        statusElement.className = 'status-indicator error';
+                    }
+                }
+            });
+
+            // Set up event listeners for timeline buttons (using EventBus)
+            const clearBtn = document.getElementById('clear-timeline');
+            if (clearBtn) {
+                clearBtn.addEventListener('click', () => {
+                    console.log('Clear button clicked (from main script)');
+                    eventBus.publishTimelineAction('clear');
+                });
+            }
+
+            const playBtn = document.getElementById('play-timeline');
+            if (playBtn) {
+                playBtn.addEventListener('click', () => {
+                    console.log('Play button clicked (from main script)');
+                    const action = timeline['isPlaying'] ? 'stop' : 'play';
+                    eventBus.publishTimelineAction(action);
+                });
+            }
+
+            const saveBtn = document.getElementById('save-timeline');
+            if (saveBtn) {
+                saveBtn.addEventListener('click', () => {
+                    console.log('Save button clicked (from main script)');
+                    eventBus.publishTimelineAction('save');
+                });
+            }
         });
     </script>
 </body>

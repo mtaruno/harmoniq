@@ -1,17 +1,19 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-const chord_detector_1 = require("./chord-detector");
-const timeline_1 = require("./timeline");
-class Piano {
+import { ChordDetector } from './chord-detector.js';
+import { Timeline } from './timeline.js';
+export class Piano {
     constructor() {
         this.keys = [];
         this.activeNotes = new Set();
+        console.log('Piano constructor called');
         this.init();
     }
     init() {
+        console.log('Piano init called');
         const pianoElement = document.getElementById('piano');
-        if (!pianoElement)
+        if (!pianoElement) {
+            console.log('Piano element not found');
             return;
+        }
         const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
         // Create two octaves of keys
         for (let octave = 0; octave < 2; octave++) {
@@ -27,6 +29,7 @@ class Piano {
                 this.keys.push(key);
             });
         }
+        console.log('Created', this.keys.length, 'piano keys');
         // Add keyboard event listeners
         document.addEventListener('keydown', (e) => this.handleKeyPress(e));
         document.addEventListener('keyup', (e) => this.handleKeyRelease(e));
@@ -80,7 +83,7 @@ class Piano {
         }
     }
     updateChordDisplay() {
-        const chordDetector = new chord_detector_1.ChordDetector();
+        const chordDetector = new ChordDetector();
         const chord = chordDetector.detectChord(Array.from(this.activeNotes));
         const currentChordElement = document.getElementById('current-chord');
         if (currentChordElement) {
@@ -88,13 +91,9 @@ class Piano {
         }
         // Update timeline
         if (chord) {
-            const timeline = new timeline_1.Timeline();
+            const timeline = new Timeline();
             timeline.addChord(chord);
         }
     }
 }
-// Initialize piano when the page loads
-document.addEventListener('DOMContentLoaded', () => {
-    new Piano();
-});
 //# sourceMappingURL=piano.js.map

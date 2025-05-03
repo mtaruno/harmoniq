@@ -1,7 +1,4 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.ChordDetector = void 0;
-class ChordDetector {
+export class ChordDetector {
     constructor() {
         this.chordPatterns = {
             'maj': [0, 4, 7],
@@ -55,5 +52,4 @@ class ChordDetector {
         return pattern.every(interval => notes.includes(interval));
     }
 }
-exports.ChordDetector = ChordDetector;
 //# sourceMappingURL=chord-detector.js.map
