@@ -5,7 +5,7 @@ New consideration: Create a mobile app, ditch the MIDI.
 Application Homepage concept
 
 ![alt text](homepage-mock.png)
-
+![alt text](image.png)
 
 System design architecture diagram
 
