@@ -2,10 +2,15 @@
 
 New consideration: Create a mobile app, ditch the MIDI.
 
+Application Homepage concept
+
+![alt text](homepage-mock.png)
+
 
 System design architecture diagram
 
-![alt text](<CleanShot 2025-05-16 at 22.24.37@2x.png>)
+
+![alt text](system-diagram1.png)
 
 
 Harmoniq is a tool for aspiring pianists who want to improvise/compose, and familiarize themselves with music theory in an interactive and synergistic way. It's kind of like auto-complete but for chords. Many composers, cover artists, and improvisers rely heavily on playing by ear. However, they hit a bottleneck when trying to: 
