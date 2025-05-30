@@ -1,127 +1,8 @@
 import numpy as np
-import sounddevice as sd
-import librosa
-import threading
 import time
 from collections import deque, Counter
 from datetime import datetime, timedelta
-
-# Audio settings
-SAMPLE_RATE = 22050
-FRAME_DURATION = 1.5  # Reduced for more responsive detection
-FRAME_SIZE = int(SAMPLE_RATE * FRAME_DURATION)
-
-# Enhanced chord templates with major, minor, and seventh chords
-CHORD_TEMPLATES = {
-    # MAJOR TRIADS
-    'C':    [1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0],
-    'C#':   [0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0],
-    'Db':   [0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0],
-    'D':    [0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0],
-    'D#':   [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0],
-    'Eb':   [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0],
-    'E':    [0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1],
-    'F':    [1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0],
-    'F#':   [0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0],
-    'Gb':   [0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0],
-    'G':    [0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1],
-    'G#':   [1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0],
-    'Ab':   [1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0],
-    'A':    [0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0],
-    'A#':   [0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0],
-    'Bb':   [0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0],
-    'B':    [0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1],
-    
-    # MINOR TRIADS
-    'Cm':   [1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0],
-    'C#m':  [0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
-    'Dbm':  [0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
-    'Dm':   [0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0],
-    'D#m':  [0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0],
-    'Ebm':  [0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0],
-    'Em':   [0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1],
-    'Fm':   [1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0],
-    'F#m':  [0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0],
-    'Gbm':  [0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0],
-    'Gm':   [0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0],
-    'G#m':  [0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1],
-    'Abm':  [0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1],
-    'Am':   [1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0],
-    'A#m':  [0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0],
-    'Bbm':  [0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0],
-    'Bm':   [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-    
-    # MAJOR SEVENTH CHORDS (Root, 3rd, 5th, 7th)
-    'Cmaj7': [1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1],
-    'C#maj7':[0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0],
-    'Dbmaj7':[0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0],
-    'Dmaj7': [0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1],
-    'D#maj7':[0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0],
-    'Ebmaj7':[0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0],
-    'Emaj7': [0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1],
-    'Fmaj7': [1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1],
-    'F#maj7':[0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0],
-    'Gbmaj7':[0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0],
-    'Gmaj7': [0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1],
-    'G#maj7':[1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0],
-    'Abmaj7':[1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0],
-    'Amaj7': [0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0],
-    'A#maj7':[0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0],
-    'Bbmaj7':[0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0],
-    'Bmaj7': [0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1],
-    
-    # MINOR SEVENTH CHORDS (Root, b3rd, 5th, b7th)
-    'Cm7':   [1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0],
-    'C#m7':  [0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1],
-    'Dbm7':  [0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1],
-    'Dm7':   [0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1],
-    'D#m7':  [0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0],
-    'Ebm7':  [0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0],
-    'Em7':   [0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1],
-    'Fm7':   [1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1],
-    'F#m7':  [0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0],
-    'Gbm7':  [0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0],
-    'Gm7':   [0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0],
-    'G#m7':  [0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1],
-    'Abm7':  [0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1],
-    'Am7':   [1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1],
-    'A#m7':  [0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0],
-    'Bbm7':  [0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0],
-    'Bm7':   [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-    
-    # DOMINANT SEVENTH CHORDS (Root, 3rd, 5th, b7th)
-    'C7':    [1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0],
-    'C#7':   [0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1],
-    'Db7':   [0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1],
-    'D7':    [0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1],
-    'D#7':   [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0],
-    'Eb7':   [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0],
-    'E7':    [0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1],
-    'F7':    [1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1],
-    'F#7':   [0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0],
-    'Gb7':   [0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0],
-    'G7':    [0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1],
-    'G#7':   [1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0],
-    'Ab7':   [1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0],
-    'A7':    [0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0],
-    'A#7':   [0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0],
-    'Bb7':   [0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0],
-    'B7':    [0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1],
-    
-    # DIMINISHED CHORDS
-    'Cdim':  [1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0],
-    'C#dim': [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0],
-    'Ddim':  [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0],
-    'Ebdim': [0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0],
-    'Edim':  [0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0],
-    'Fdim':  [1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1],
-    'F#dim': [0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0],
-    'Gdim':  [0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0],
-    'Abdim': [0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1],
-    'Adim':  [1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0],
-    'Bbdim': [0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0],
-    'Bdim':  [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-}
+from live_chord_recognizer import ChordDetector, SAMPLE_RATE
 
 # Key signatures with diminished chords
 MAJOR_KEYS = {
@@ -154,40 +35,16 @@ COMMON_PROGRESSIONS = {
 
 class ProgressionDetector:
     def __init__(self):
-        self.audio_buffer = deque()
-        self.lock = threading.Lock()
+        self.chord_detector = ChordDetector()
         self.is_running = False
         
         # Progression tracking
-        self.chord_history = deque(maxlen=30)  # Store last 30 chord changes
+        self.chord_history = deque(maxlen=50)  # Store last 50 chord changes
         self.current_key = None
         self.key_confidence = 0
         self.last_chord = None
         self.chord_start_time = None
-        self.last_timeline_update = datetime.now()
-        
-    def match_chord(self, chroma):
-        # Normalize chroma vector
-        chroma_norm = chroma / (np.linalg.norm(chroma) + 1e-8)
-        
-        max_score = -1
-        matched_chord = "Unknown"
-        confidence = 0
-        
-        for chord, template in CHORD_TEMPLATES.items():
-            template_norm = np.array(template) / (np.linalg.norm(template) + 1e-8)
-            score = np.dot(chroma_norm, template_norm)
-            
-            if score > max_score:
-                max_score = score
-                matched_chord = chord
-                confidence = score
-                
-        # Only return chord if confidence is high enough
-        if confidence > 0.6:
-            return matched_chord, confidence
-        else:
-            return "Unknown", confidence
+        self.session_start_time = None
     
     def detect_key(self, recent_chords):
         """Dynamically detect the key from recent chord sequence"""
@@ -204,8 +61,11 @@ class ProgressionDetector:
                 if base_chord in key_chords:
                     score += 1
                     
-            key_scores[key] = score / len(recent_chords)
+            key_scores[key] = score / len(recent_chords) if recent_chords else 0
         
+        if not key_scores:
+            return None, 0
+            
         best_key = max(key_scores, key=key_scores.get)
         confidence = key_scores[best_key]
         
@@ -259,47 +119,39 @@ class ProgressionDetector:
                         
         return None
     
-    def print_timeline(self):
-        """Print visual timeline of chord progression"""
-        current_time = datetime.now()
-        
-        # Only update timeline every 2 seconds to reduce spam
-        if (current_time - self.last_timeline_update).total_seconds() < 2:
-            return
-        self.last_timeline_update = current_time
-        
+    def print_session_summary(self):
+        """Print final session summary with full timeline"""
         if len(self.chord_history) < 2:
+            print("🎵 No chord progression detected in this session.")
             return
             
-        # Clear screen for clean timeline display
-        print("\n" * 3)
-        print("="*70)
-        print("🎼 HARMONIC PROGRESSION TIMELINE")
-        print("="*70)
+        print("\n" + "="*80)
+        print("🎼 HARMONIC PROGRESSION SESSION SUMMARY")
+        print("="*80)
         
-        # Get recent unique chords
-        recent_chords = []
-        seen_chords = set()
-        
-        for entry in reversed(list(self.chord_history)):
+        # Get all unique chords from session
+        all_chords = []
+        for entry in self.chord_history:
             chord = entry['chord']
-            if chord not in seen_chords and chord != "Unknown":
-                recent_chords.insert(0, entry)
-                seen_chords.add(chord)
-                if len(recent_chords) >= 8:
-                    break
+            if chord != "Unknown":
+                all_chords.append(chord)
         
-        if not recent_chords:
-            print("🎵 Play some chords to see progression...")
+        if not all_chords:
+            print("🎵 No valid chords detected in this session.")
             return
             
-        # Detect key
-        chord_names = [entry['chord'] for entry in recent_chords]
-        detected_key, confidence = self.detect_key(chord_names)
+        # Detect key from entire session
+        detected_key, confidence = self.detect_key(all_chords)
         
         if detected_key and confidence > 0.5:
             self.current_key = detected_key
             self.key_confidence = confidence
+        
+        # Display session info
+        session_duration = (datetime.now() - self.session_start_time).total_seconds() if self.session_start_time else 0
+        print(f"⏰ Session Duration: {session_duration:.1f} seconds")
+        print(f"🎹 Total Chords Detected: {len(self.chord_history)}")
+        print(f"🎵 Unique Chords: {len(set(all_chords))}")
         
         # Display key info
         if self.current_key:
@@ -307,11 +159,11 @@ class ProgressionDetector:
             key_chords = ' - '.join(MAJOR_KEYS[self.current_key])
             print(f"📋 Diatonic chords: {key_chords}")
         else:
-            print("🗝️  Key: Analyzing...")
+            print("🗝️  Key: Could not determine")
         
         print()
-        print("⏱️  CHORD PROGRESSION:")
-        print("-" * 50)
+        print("⏱️  CHORD PROGRESSION TIMELINE:")
+        print("-" * 70)
         
         # Build visual timeline
         chord_line = ""
@@ -319,10 +171,9 @@ class ProgressionDetector:
         duration_line = ""
         roman_numerals = []
         
-        for entry in recent_chords:
+        for entry in list(self.chord_history):
             chord = entry['chord']
             duration = entry.get('duration', 2.0)
-            confidence = entry.get('confidence', 0.0)
             
             # Convert to Roman numeral
             if self.current_key:
@@ -332,8 +183,8 @@ class ProgressionDetector:
                 roman = chord
                 roman_numerals.append(chord)
             
-            # Create visual blocks
-            block_size = max(3, min(8, int(duration * 2)))  # Scale duration
+            # Create visual blocks (limit width for readability)
+            block_size = max(3, min(8, int(duration * 2)))
             
             chord_str = f"{chord:^{block_size}} "
             roman_str = f"{roman:^{block_size}} "
@@ -342,167 +193,204 @@ class ProgressionDetector:
             chord_line += chord_str
             roman_line += roman_str
             duration_line += duration_str
+            
+            # Add line breaks for readability if line gets too long
+            if len(chord_line) > 60:
+                print(f"Chords:   {chord_line}")
+                print(f"Roman:    {roman_line}")
+                print(f"Duration: {duration_line}")
+                print()
+                chord_line = ""
+                roman_line = ""
+                duration_line = ""
         
-        print(f"Chords:   {chord_line}")
-        print(f"Roman:    {roman_line}")
-        print(f"Duration: {duration_line}")
+        # Print remaining chords
+        if chord_line:
+            print(f"Chords:   {chord_line}")
+            print(f"Roman:    {roman_line}")
+            print(f"Duration: {duration_line}")
         
         # Visual representation
+        print("\n📊 Visual Timeline:")
         visual_line = ""
-        for entry in recent_chords:
+        for entry in list(self.chord_history):
             duration = entry.get('duration', 2.0)
-            block_size = max(3, min(8, int(duration * 2)))
+            block_size = max(1, min(6, int(duration)))
             visual_line += "█" * block_size + " "
-        print(f"Visual:   {visual_line}")
+            
+            # Line break for long timelines
+            if len(visual_line) > 60:
+                print(f"      {visual_line}")
+                visual_line = ""
         
-        # Pattern detection
+        if visual_line:
+            print(f"      {visual_line}")
+        
+        # Pattern analysis
+        print("\n🎵 PROGRESSION ANALYSIS:")
+        print("-" * 40)
+        
         if len(roman_numerals) >= 3:
             pattern = self.detect_progression_pattern(roman_numerals)
             if pattern:
-                print(f"\n🎵 Progression Pattern: {pattern}")
+                print(f"🎼 Identified Pattern: {pattern}")
         
-        # Show recent sequence
+        # Show full sequence
         if len(roman_numerals) >= 2:
-            sequence = ' → '.join(roman_numerals[-6:])
-            print(f"📊 Current sequence: {sequence}")
+            full_sequence = ' → '.join(roman_numerals)
+            print(f"📝 Full Progression: {full_sequence}")
         
-        # Statistics
-        total_duration = sum([entry.get('duration', 0) for entry in recent_chords])
-        print(f"⏰ Total playing time: {total_duration:.1f} seconds")
-        print(f"🎹 Chords detected: {len(self.chord_history)}")
+        # Chord statistics
+        chord_counts = Counter(all_chords)
+        print(f"\n📈 Most Used Chords:")
+        for chord, count in chord_counts.most_common(5):
+            roman = self.chord_to_roman(chord, self.current_key) if self.current_key else chord
+            print(f"   {chord} ({roman}): {count} times")
         
-        print("="*70)
+        # Total playing time
+        total_duration = sum([entry.get('duration', 0) for entry in self.chord_history])
+        print(f"\n⏱️  Total Playing Time: {total_duration:.1f} seconds")
+        
+        print("="*80)
     
-    def process_audio(self):
-        with self.lock:
-            if len(self.audio_buffer) < FRAME_SIZE:
-                return
-            
-            # Get audio data
-            audio_data = list(self.audio_buffer)[:FRAME_SIZE]
-            # Clear processed data
-            for _ in range(min(FRAME_SIZE // 2, len(self.audio_buffer))):
-                self.audio_buffer.popleft()
+    def on_chord_detected(self, chord, confidence, volume):
+        """Callback for chord detection - minimal real-time output"""
+        current_time = datetime.now()
         
-        try:
-            y = np.array(audio_data, dtype=np.float32)
-            
-            # Check if there's enough signal
-            if np.max(np.abs(y)) < 0.01:
-                return
-                
-            # Extract chroma features
-            chroma = librosa.feature.chroma_cqt(y=y, sr=SAMPLE_RATE, 
-                                               hop_length=512, 
-                                               fmin=librosa.note_to_hz('C2'))
-            
-            if chroma.size == 0:
-                return
-                
-            # Average chroma over time
-            avg_chroma = np.mean(chroma, axis=1)
-            
-            # Detect chord
-            chord, confidence = self.match_chord(avg_chroma)
-            
-            current_time = datetime.now()
-            volume = np.sqrt(np.mean(y**2))
-            
-            # Print current detection (simplified)
+        # Simple real-time feedback (no timeline spam)
+        if chord != "Unknown":
             print(f"🎵 {chord:8} | Conf: {confidence:.2f} | Vol: {volume:.3f}")
+        
+        # Track chord changes for progression (only high confidence chords)
+        if (chord != self.last_chord and 
+            chord != "Unknown" and 
+            confidence > 0.7):  # Only track high confidence chords
             
-            # Track chord changes for progression
-            if chord != self.last_chord and chord != "Unknown" and confidence > 0.7:
-                if self.last_chord and self.chord_start_time:
-                    # Calculate duration of previous chord
-                    duration = (current_time - self.chord_start_time).total_seconds()
-                    # Update the last entry with duration
-                    if self.chord_history:
-                        self.chord_history[-1]['duration'] = duration
-                
-                # Add new chord to history
-                self.chord_history.append({
-                    'chord': chord,
-                    'time': current_time,
-                    'confidence': confidence,
-                    'duration': 0
-                })
-                
-                self.last_chord = chord
-                self.chord_start_time = current_time
-                
-                # Update timeline display
-                self.print_timeline()
+            if self.last_chord and self.chord_start_time:
+                # Calculate duration of previous chord
+                duration = (current_time - self.chord_start_time).total_seconds()
+                # Update the last entry with duration
+                if self.chord_history:
+                    self.chord_history[-1]['duration'] = duration
             
-        except Exception as e:
-            print(f"Processing error: {e}")
-    
-    def audio_callback(self, indata, frames, time_info, status):
-        if status:
-            print(f"Audio status: {status}")
+            # Add new chord to history
+            self.chord_history.append({
+                'chord': chord,
+                'time': current_time,
+                'confidence': confidence,
+                'duration': 0
+            })
             
-        with self.lock:
-            # Add new audio data
-            self.audio_buffer.extend(indata[:, 0])
+            self.last_chord = chord
+            self.chord_start_time = current_time
             
-            # Limit buffer size to prevent memory issues
-            while len(self.audio_buffer) > FRAME_SIZE * 2:
-                self.audio_buffer.popleft()
+            # Update key detection periodically (not every chord)
+            if len(self.chord_history) % 3 == 0:  # Every 3 chords
+                recent_chords = [entry['chord'] for entry in list(self.chord_history)[-8:]]
+                detected_key, confidence = self.detect_key(recent_chords)
+                if detected_key and confidence > 0.5:
+                    if self.current_key != detected_key:
+                        self.current_key = detected_key
+                        self.key_confidence = confidence
+                        print(f"🗝️  Key detected: {self.current_key} major")
     
     def run(self):
+        """Start the progression detector"""
         print("🎼 REAL-TIME HARMONIC PROGRESSION ANALYZER")
         print("="*60)
         print("🎹 Play chords clearly and hold them")
         print("🔍 Automatic key detection")
-        print("📊 Real-time progression timeline")
+        print("📊 Timeline will be shown at session end")
         print("🎵 Pattern recognition")
-        print("⏹️  Press Ctrl+C to exit")
+        print("⏹️  Press Ctrl+C to exit and see timeline")
         print("="*60)
         
         self.is_running = True
+        self.session_start_time = datetime.now()
         
         try:
-            # List available audio devices
-            print("Available audio devices:")
-            print(sd.query_devices())
-            print("-" * 60)
-            
-            with sd.InputStream(callback=self.audio_callback, 
-                              channels=1, 
-                              samplerate=SAMPLE_RATE,
-                              blocksize=1024):
-                while self.is_running:
-                    time.sleep(0.1)  # Frequent processing for responsiveness
-                    self.process_audio()
-                    
+            # Start the chord detector with our callback
+            self.chord_detector.start(on_chord_detected=self.on_chord_detected)
         except KeyboardInterrupt:
-            print("\n🎵 Session ended!")
-            if self.chord_history:
-                print(f"📈 Total chords detected: {len(self.chord_history)}")
-                if self.current_key:
-                    print(f"🗝️  Final detected key: {self.current_key} major")
-                
-                # Show final progression summary
-                if len(self.chord_history) >= 3:
-                    final_chords = [entry['chord'] for entry in list(self.chord_history)[-6:]]
-                    final_romans = []
-                    if self.current_key:
-                        final_romans = [self.chord_to_roman(chord, self.current_key) for chord in final_chords]
-                    else:
-                        final_romans = final_chords
-                    
-                    final_sequence = ' → '.join(final_romans)
-                    print(f"🎼 Final progression: {final_sequence}")
-                    
-            self.is_running = False
+            pass  # Let the main handler deal with it
         except Exception as e:
             print(f"Error: {e}")
-            print("Try checking your microphone or audio settings")
+        finally:
+            self.stop()
+    
+    def stop(self):
+        """Stop the progression detector and show final timeline"""
+        print("\n🎵 Stopping progression analyzer...")
+        self.is_running = False
+        
+        # Stop the chord detector
+        self.chord_detector.stop()
+        
+        # Finalize last chord duration
+        if self.chord_history and self.chord_start_time:
+            duration = (datetime.now() - self.chord_start_time).total_seconds()
+            self.chord_history[-1]['duration'] = duration
+        
+        # Clear screen for better visibility
+        print("\n" * 3)
+        
+        # Show final session summary
+        self.print_session_summary()
+        
+        # Additional harmonic progression analysis
+        if len(self.chord_history) >= 2:
+            print("\n🎼 HARMONIC PROGRESSION ANALYSIS")
+            print("=" * 50)
+            
+            # Get all chords from the session
+            all_chords = [entry['chord'] for entry in self.chord_history if entry['chord'] != "Unknown"]
+            
+            if all_chords:
+                # Convert to Roman numerals if we have a key
+                if self.current_key:
+                    roman_numerals = [self.chord_to_roman(chord, self.current_key) for chord in all_chords]
+                    print(f"\n📝 Full Progression in {self.current_key} major:")
+                    print("   " + " → ".join(roman_numerals))
+                    
+                    # Show chord relationships
+                    print("\n🎵 Chord Relationships:")
+                    for i in range(len(roman_numerals) - 1):
+                        print(f"   {roman_numerals[i]} → {roman_numerals[i+1]}")
+                    
+                    # Identify common patterns
+                    print("\n🎼 Common Patterns Found:")
+                    for length in range(4, 1, -1):
+                        if len(roman_numerals) >= length:
+                            pattern = "-".join(roman_numerals[-length:])
+                            for prog_pattern, name in COMMON_PROGRESSIONS.items():
+                                if pattern == prog_pattern:
+                                    print(f"   • {name}: {pattern}")
+                                elif pattern in prog_pattern:
+                                    print(f"   • Part of {name}: {pattern}")
+                
+                # Show chord frequency
+                chord_counts = Counter(all_chords)
+                print("\n📊 Chord Frequency:")
+                for chord, count in chord_counts.most_common():
+                    percentage = (count / len(all_chords)) * 100
+                    print(f"   {chord}: {count} times ({percentage:.1f}%)")
+        
+        print("\n🎵 Session ended. Thank you for playing!")
+        print("=" * 50)
 
+# Standalone usage
 if __name__ == "__main__":
+    print("🎼 Live Chord Progression Detector")
+    print("=" * 50)
+    
+    detector = ProgressionDetector()
     try:
-        detector = ProgressionDetector()
         detector.run()
+    except KeyboardInterrupt:
+        pass  # Let the finally block handle cleanup
     except Exception as e:
         print(f"Failed to start analyzer: {e}")
         print("Make sure you have required packages: pip install numpy sounddevice librosa")
+    finally:
+        print("\n🎵 Stopping progression analyzer...")
+        detector.stop()

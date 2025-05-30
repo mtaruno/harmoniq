@@ -10,6 +10,16 @@ Application Homepage concept
 System design architecture diagram
 ![alt text](systemdesign.png)
 
+
+In terms of the backend, we have 
+
+
+live_chord_recognizer.py - this file is the base technology that converts a session to a music t
+live_chord_progression.py - this version also includes showing the chord progression at the end of the session
+
+after contemplating between writing this project in React Native or Flutter I have devided to use flutter as it is better suited for MVPs, it has a growing support for lower latency real time audio, it has a custom expressive UI since Flutters widget system is perfect for drawing chord graphs, timelines, etc. It's also a strong cross platform choice as it can run on iOS, ANdroid, desktop, and web.
+
+
 **If you want to run the current web version, go to the web folder and follow the instructions in the README there.**
 
 Harmoniq is a tool for aspiring pianists who want to improvise/compose, and familiarize themselves with music theory in an interactive and synergistic way. It's kind of like auto-complete but for chords. Many composers, cover artists, and improvisers rely heavily on playing by ear. However, they hit a bottleneck when trying to: 
