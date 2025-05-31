@@ -128,6 +128,7 @@ class ChordDetector:
         self.lock = threading.Lock()
         self.is_running = False
         self.on_chord_detected = None  # Callback for chord detection
+        self.channels = 1  # Default to mono
         
     def match_chord(self, chroma):
         # Normalize chroma vector
@@ -203,11 +204,11 @@ class ChordDetector:
             print(f"Audio status: {status}")
             
         with self.lock:
-            # Average both channels if stereo, otherwise use the single channel
+            # Handle both mono and stereo inputs
             if indata.shape[1] > 1:
-                audio_data = np.mean(indata, axis=1)  # Average both channels
+                audio_data = np.mean(indata, axis=1)  # Average both channels for stereo
             else:
-                audio_data = indata[:, 0]
+                audio_data = indata[:, 0]  # Use single channel for mono
                 
             # Add new audio data
             self.audio_buffer.extend(audio_data)
@@ -224,11 +225,17 @@ class ChordDetector:
         try:
             # List available audio devices
             print("Available audio devices:")
-            print(sd.query_devices())
+            devices = sd.query_devices()
+            print(devices)
             print("-" * 50)
             
+            # Get default input device
+            default_input = sd.query_devices(kind='input')
+            self.channels = default_input['max_input_channels']
+            print(f"Using input device with {self.channels} channel(s)")
+            
             with sd.InputStream(callback=self.audio_callback, 
-                              channels=2,  # Use 2 channels (stereo)
+                              channels=self.channels,  # Use detected number of channels
                               samplerate=SAMPLE_RATE,
                               blocksize=1024):
                 while self.is_running:

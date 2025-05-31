@@ -15,6 +15,16 @@ MAJOR_KEYS = {
     'Bb': ['Bb', 'Cm', 'Dm', 'Eb', 'F', 'Gm', 'Adim'],
     'Eb': ['Eb', 'Fm', 'Gm', 'Ab', 'Bb', 'Cm', 'Ddim'],
 }
+MINOR_KEYS = {
+    'A': ['Am', 'Bdim', 'C', 'Dm', 'Em', 'F', 'G'],
+    'E': ['Em', 'F#dim', 'G', 'Am', 'Bm', 'C', 'D'],
+    'B': ['Bm', 'C#dim', 'D', 'Em', 'F#m', 'G', 'A'],
+    'F#': ['F#m', 'G#dim', 'A', 'Bm', 'C#m', 'D', 'E'],
+    'C#': ['C#m', 'D#dim', 'E', 'F#m', 'G#m', 'A', 'B'],
+    'D': ['Dm', 'Edim', 'F', 'Gm', 'Am', 'Bb', 'C'],
+    'G': ['Gm', 'Adim', 'Bb', 'Cm', 'Dm', 'Eb', 'F'],
+    'C': ['Cm', 'Ddim', 'Eb', 'Fm', 'Gm', 'Ab', 'Bb'],
+}
 
 # Roman numeral notation
 ROMAN_NUMERALS = ['I', 'ii', 'iii', 'IV', 'V', 'vi', 'vii°']
@@ -45,38 +55,65 @@ class ProgressionDetector:
         self.last_chord = None
         self.chord_start_time = None
         self.session_start_time = None
-    
+        
+        # Audio configuration
+        self.channels = self.chord_detector.channels  # Get channels from ChordDetector
+
+
+
     def detect_key(self, recent_chords):
-        """Dynamically detect the key from recent chord sequence"""
+        """Smart key detection between major and minor scales with weighted scores"""
         if len(recent_chords) < 3:
             return None, 0
-            
-        key_scores = {}
-        
-        for key, key_chords in MAJOR_KEYS.items():
+
+        def score_key(key_chords):
             score = 0
             for chord in recent_chords:
-                # Clean chord name but keep important extensions
                 base_chord = chord.replace('7', '').replace('maj', '')
                 if base_chord in key_chords:
-                    score += 1
-                    
-            key_scores[key] = score / len(recent_chords) if recent_chords else 0
-        
-        if not key_scores:
-            return None, 0
-            
+                    # Tonic & dominant chords are more significant
+                    index = key_chords.index(base_chord)
+                    weight = 2 if index in [0, 4] else 1
+                    score += weight
+            return score / len(recent_chords)
+
+        key_scores = {}
+
+        # Score all major keys
+        for key, chords in MAJOR_KEYS.items():
+            key_scores[f"{key} major"] = score_key(chords)
+
+        # Score all minor keys
+        for key, chords in MINOR_KEYS.items():
+            key_scores[f"{key} minor"] = score_key(chords)
+
         best_key = max(key_scores, key=key_scores.get)
-        confidence = key_scores[best_key]
-        
-        return best_key if confidence > 0.4 else None, confidence
+        best_score = key_scores[best_key]
+
+        return (best_key, best_score) if best_score > 0.35 else (None, 0)
     
-    def chord_to_roman(self, chord, key):
-        """Convert chord to Roman numeral in given key"""
-        if not key or key not in MAJOR_KEYS:
+    def chord_to_roman(self, chord, key_info):
+        """Convert chord to Roman numeral in given key (handles both major and minor)"""
+        if not key_info:
             return chord
             
-        key_chords = MAJOR_KEYS[key]
+        # Parse key info (e.g., "C major" or "A minor")
+        key_parts = key_info.split()
+        if len(key_parts) != 2:
+            return chord
+            
+        key_root = key_parts[0]
+        key_type = key_parts[1]
+        
+        # Get the appropriate scale
+        if key_type == "major":
+            key_chords = MAJOR_KEYS.get(key_root, [])
+        elif key_type == "minor":
+            key_chords = MINOR_KEYS.get(key_root, [])
+            # For minor keys, use different Roman numerals
+            minor_romans = ['i', 'ii°', 'III', 'iv', 'v', 'VI', 'VII']
+        else:
+            return chord
         
         # Handle different chord types
         if 'dim' in chord:
@@ -86,11 +123,16 @@ class ProgressionDetector:
         
         try:
             index = key_chords.index(base_chord)
-            roman = ROMAN_NUMERALS[index]
+            
+            # Use appropriate Roman numerals for major vs minor
+            if key_type == "major":
+                roman = ROMAN_NUMERALS[index]
+            else:  # minor key
+                roman = minor_romans[index]
             
             # Add extensions back
             if 'dim' in chord:
-                pass  # Already has ° symbol
+                pass  # Already has ° symbol or handled in minor romans
             elif '7' in chord and 'maj7' not in chord:
                 roman += '7'
             elif 'maj7' in chord:
@@ -140,11 +182,12 @@ class ProgressionDetector:
             print("🎵 No valid chords detected in this session.")
             return
             
+            
         # Detect key from entire session
         detected_key, confidence = self.detect_key(all_chords)
         
         if detected_key and confidence > 0.5:
-            self.current_key = detected_key
+            self.current_key = detected_key            
             self.key_confidence = confidence
         
         # Display session info
@@ -152,12 +195,28 @@ class ProgressionDetector:
         print(f"⏰ Session Duration: {session_duration:.1f} seconds")
         print(f"🎹 Total Chords Detected: {len(self.chord_history)}")
         print(f"🎵 Unique Chords: {len(set(all_chords))}")
-        
-        # Display key info
+
+
         if self.current_key:
-            print(f"🗝️  Detected Key: {self.current_key} major (confidence: {self.key_confidence:.0%})")
-            key_chords = ' - '.join(MAJOR_KEYS[self.current_key])
-            print(f"📋 Diatonic chords: {key_chords}")
+            print(f"🗝️  Detected Key: {self.current_key} (confidence: {self.key_confidence:.0%})")
+            
+            if "major" in self.current_key:
+                key_root = self.current_key.replace(" major", "")
+                scale = MAJOR_KEYS.get(key_root, [])
+                roman_scale = ROMAN_NUMERALS
+            elif "minor" in self.current_key:
+                key_root = self.current_key.replace(" minor", "")
+                scale = MINOR_KEYS.get(key_root, [])
+                roman_scale = ['i', 'ii°', 'III', 'iv', 'v', 'VI', 'VII']
+            else:
+                scale = []
+                roman_scale = []
+
+            print(f"📋 Diatonic chords: {' - '.join(scale)}")
+            
+            # Show Roman numeral mapping
+            if scale and roman_scale:
+                print(f"🎼 Roman numerals: {' - '.join(roman_scale)}")
         else:
             print("🗝️  Key: Could not determine")
         
@@ -225,27 +284,64 @@ class ProgressionDetector:
         
         if visual_line:
             print(f"      {visual_line}")
-        
         # Pattern analysis
         print("\n🎵 PROGRESSION ANALYSIS:")
         print("-" * 40)
-        
+
         if len(roman_numerals) >= 3:
             pattern = self.detect_progression_pattern(roman_numerals)
             if pattern:
                 print(f"🎼 Identified Pattern: {pattern}")
-        
-        # Show full sequence
+
+        # Show full sequence with both chord names and Roman numerals
         if len(roman_numerals) >= 2:
-            full_sequence = ' → '.join(roman_numerals)
-            print(f"📝 Full Progression: {full_sequence}")
-        
-        # Chord statistics
+            chord_sequence = ' → '.join([entry['chord'] for entry in list(self.chord_history)])
+            roman_sequence = ' → '.join(roman_numerals)
+            print(f"📝 Chord Progression: {chord_sequence}")
+            print(f"🎼 Roman Numeral Analysis: {roman_sequence}")
+
+        # Roman numeral breakdown
+        if self.current_key and roman_numerals:
+            print(f"\n🎼 ROMAN NUMERAL BREAKDOWN:")
+            print("-" * 40)
+            unique_romans = list(dict.fromkeys(roman_numerals))  # Preserve order, remove duplicates
+            
+            for roman in unique_romans:
+                # Find corresponding chord
+                matching_chords = []
+                for entry in self.chord_history:
+                    chord = entry['chord']
+                    if self.chord_to_roman(chord, self.current_key) == roman:
+                        if chord not in matching_chords:
+                            matching_chords.append(chord)
+                
+                chord_list = ", ".join(matching_chords)
+                
+                # Add functional analysis
+                if "major" in self.current_key:
+                    functions = {
+                        'I': 'Tonic (home)', 'ii': 'Subdominant', 'iii': 'Mediant', 
+                        'IV': 'Subdominant', 'V': 'Dominant', 'vi': 'Relative minor', 'vii°': 'Leading tone'
+                    }
+                else:  # minor key
+                    functions = {
+                        'i': 'Tonic (home)', 'ii°': 'Subdominant', 'III': 'Relative major', 
+                        'iv': 'Subdominant', 'v': 'Dominant', 'VI': 'Submediant', 'VII': 'Subtonic'
+                    }
+                
+                base_roman = roman.replace('7', '').replace('M7', '')
+                function = functions.get(base_roman, 'Non-diatonic')
+                print(f"   {roman:4} = {chord_list:8} ({function})")
+
+        # Chord statistics with Roman numerals
         chord_counts = Counter(all_chords)
-        print(f"\n📈 Most Used Chords:")
+        print(f"\n📈 CHORD USAGE STATISTICS:")
+        print("-" * 40)
         for chord, count in chord_counts.most_common(5):
-            roman = self.chord_to_roman(chord, self.current_key) if self.current_key else chord
-            print(f"   {chord} ({roman}): {count} times")
+            roman = self.chord_to_roman(chord, self.current_key) if self.current_key else "?"
+            percentage = (count / len(all_chords)) * 100
+            print(f"   {chord:6} ({roman:4}): {count} times ({percentage:.1f}%)")
+
         
         # Total playing time
         total_duration = sum([entry.get('duration', 0) for entry in self.chord_history])
@@ -292,7 +388,7 @@ class ProgressionDetector:
                     if self.current_key != detected_key:
                         self.current_key = detected_key
                         self.key_confidence = confidence
-                        print(f"🗝️  Key detected: {self.current_key} major")
+                        print(f"🗝️  Key detected: {self.current_key}")
     
     def run(self):
         """Start the progression detector"""
@@ -302,6 +398,7 @@ class ProgressionDetector:
         print("🔍 Automatic key detection")
         print("📊 Timeline will be shown at session end")
         print("🎵 Pattern recognition")
+        print(f"🎤 Using {self.channels} channel{'s' if self.channels > 1 else ''} audio input")
         print("⏹️  Press Ctrl+C to exit and see timeline")
         print("="*60)
         
@@ -315,6 +412,7 @@ class ProgressionDetector:
             pass  # Let the main handler deal with it
         except Exception as e:
             print(f"Error: {e}")
+            print("Make sure your microphone is properly connected and configured")
         finally:
             self.stop()
     
@@ -348,8 +446,9 @@ class ProgressionDetector:
             if all_chords:
                 # Convert to Roman numerals if we have a key
                 if self.current_key:
-                    roman_numerals = [self.chord_to_roman(chord, self.current_key) for chord in all_chords]
-                    print(f"\n📝 Full Progression in {self.current_key} major:")
+                    roman_numerals = [self.chord_to_roman(chord, self.c
+                                                          urrent_key) for chord in all_chords]
+                    print(f"\n📝 Full Progression in {self.current_key}:")
                     print("   " + " → ".join(roman_numerals))
                     
                     # Show chord relationships
