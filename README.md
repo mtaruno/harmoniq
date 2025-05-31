@@ -18,6 +18,8 @@ People talk about hand-eye coordination; this tool helps with about ear-music co
 
 We begin by starting your session by clicking START, which activates the microphone and starts listening for incoming music being played. In the meanwhile, run `python live_chord_recognizer.py` to start the chord recognizer and `python live_chord_progression.py` to start the chord progression analyzer.
 
+Note to TA: As of the current period, the front end has not been created so please test the live chord progression Python file to get a feel for how the application is going to work. That already works successfully. To test if the function works, feel free to choose any YouTube piano song and then see if it can detect the chords correctly, it should work!
+
 A real-time music assistant (implemented in `live_chord_detector.py`) listens to your piano via audio, detects and visualizes chords as you play (demo of this is shown in `live_chord_progression.py`) and figures out the chords you are playing at any given time window (I have set it to every ~2 seconds). 
 
 When we end the session, a Session Report is made that displays the chords that you have played over your session (it only includes the chords it is more than ~80% confident in). 
@@ -26,8 +28,6 @@ I have also implemented a Key Signature classifier in `live_chord_progression.py
 
 
 Future implementations can also include other dimensions of music such as harmonic tendencies over time, voice arrangement (bass, alto, tenor). The problem right now is that the algorithm is not perfect, so it is more useful as a display currently rather than something 100% accurate. 
-
-
 
 
 
