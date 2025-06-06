@@ -236,21 +236,12 @@ First, we need to know the base key signature, so for this an algorithm is writt
 
 
 
-
-
-
-
-
-
-
 ## Frontend 
 
 After contemplating between writing this project in React Native or Flutter I have devided to use flutter as it is better suited for MVPs, it has a growing support for lower latency real time audio, it has a custom expressive UI since Flutters widget system is perfect for drawing chord graphs, timelines, etc. It's also a strong cross platform choice as it can run on iOS, Android, desktop, and web.
 
 
 **If you want to run the current web version, go to the web folder and follow the instructions in the README there.**
-
-
 
 
 ## Progress Reports
@@ -262,105 +253,9 @@ After contemplating between writing this project in React Native or Flutter I ha
 - Development scripts for building and running the application
 
 
-
-
 A screenshot of what the 'homepage' looks like currently:
 ![CleanShot 2025-04-18 at 23 03 33@2x](https://github.com/user-attachments/assets/e5024042-98ae-4bbb-a5d8-ed4a7f03261d)
 
-
-### Running the Application
-
-1. **Prerequisites**
-   - Node.js (v16 or higher)
-   - npm (Node Package Manager)
-
-2. **Installation**
-   ```bash
-   # Clone the repository
-   git clone https://github.com/mtaruno/harmoniq.git
-   cd harmoniq
-
-   # Install dependencies
-   npm install
-   ```
-
-
-
-
-3. **Development Mode**
-   ```bash
-   # Start the development server with hot reloading
-   npm run dev
-   ```
-   The application will be available at `http://localhost:3000`
-
-It will try to connect to your keyboard, and you can play a chord and it will display it! 
-
-4. **Production Build**
-   ```bash
-   # Build the TypeScript files
-   npm run build
-
-   # Start the production server
-   npm start
-   ```
-## Development Timeline
-
-### Phase 1: Core Piano Interface (Weeks 1-2)
-- **Week 1: Basic Piano Visualization**
-  - Implement interactive piano keyboard with mouse and keyboard controls
-  - Create visual feedback for pressed keys
-  - Set up basic note-to-frequency conversion
-
-- **Week 2: Chord Detection System**
-  - Implement chord pattern recognition algorithms
-  - Create chord type detection (major, minor, 7th, etc.)
-  - Develop real-time chord display
-
-### Phase 2: Timeline and Progression Features (Weeks 3-4)
-- **Week 3: Timeline Implementation**
-  - Create scrollable timeline view of played chords
-  - Implement chord history tracking
-  - Add timestamp functionality for each chord
-
-- **Week 4: Chord Progression Analysis**
-  - Develop chord progression detection
-  - Implement voice leading visualization
-  - Create harmonic tendency analysis
-
-### Phase 3: Favorites and Storage (Weeks 5-6)
-- **Week 5: Favorites System**
-  - Implement favorites list functionality
-  - Create UI for managing saved progressions
-  - Add ability to name and categorize favorites
-
-- **Week 6: Data Persistence**
-  - Set up local storage for favorites
-  - Implement data export/import functionality
-  - Create backup and restore features
-
-### Phase 4: Advanced Features (Weeks 7-8)
-- **Week 7: Alternative Voicings**
-  - Implement chord voicing suggestions
-  - Create alternative chord progression recommendations
-  - Develop voice arrangement visualization
-
-- **Week 8: Audio Input Integration**
-  - Research and implement audio input processing
-  - Integrate with Essentia.js for audio analysis
-  - Create MIDI input support
-
-### Phase 5: Polish and Deployment (Weeks 9-10)
-- **Week 9: UI/UX Refinement**
-  - Improve responsive design
-  - Enhance visual aesthetics
-  - Optimize performance
-
-- **Week 10: Deployment and Documentation**
-  - Set up production environment
-  - Deploy to VPS with Nginx
-  - Complete user documentation
-  - Prepare for public release
 
 ### Contact Information
 mtaruno@uw.edu
