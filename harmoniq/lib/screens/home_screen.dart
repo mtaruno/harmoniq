@@ -1120,7 +1120,7 @@ class _HomeScreenState extends State<HomeScreen> {
       // Calculate chord frequency
       final chordFrequency = <String, int>{};
       for (final detection in chordDetections) {
-        final chord = detection['chord'] as String;
+        final chord = detection['chord'].toString();
         chordFrequency[chord] = (chordFrequency[chord] ?? 0) + 1;
       }
 
@@ -1132,11 +1132,11 @@ class _HomeScreenState extends State<HomeScreen> {
         'detected_key': session['description']?.toString().split('| Key: ').last ?? 'Unknown',
         'key_confidence': 0.9, // High confidence since it's from analysis
         'diatonic_chords': [], // Could be populated from backend
-        'chord_progression': chordDetections.map((c) => c['chord'] as String).toList(),
-        'roman_progression': chordDetections.map((c) => c['roman'] as String? ?? '').toList(),
+        'chord_progression': chordDetections.map((c) => c['chord'].toString()).toList(),
+        'roman_progression': chordDetections.map((c) => c['roman']?.toString() ?? '').toList(),
         'chord_frequency': chordFrequency.map((k, v) => MapEntry(k, {
           'count': v,
-          'percentage': (v / chordDetections.length * 100).toStringAsFixed(1),
+          'percentage': (v / chordDetections.length * 100),
         })),
         'roman_analysis': {}, // Could be populated from backend
         'progression_pattern': '', // Could be populated from backend
@@ -1221,11 +1221,13 @@ class _HomeScreenState extends State<HomeScreen> {
             'detected_key': message['detected_key'] ?? '',
             'key_confidence': 0.9, // High confidence since it's from analysis
             'diatonic_chords': [], // Could be populated from backend
-            'chord_progression': chordHistory.map((c) => c['chord'] as String).toList(),
-            'roman_progression': chordHistory.map((c) => c['roman'] as String? ?? '').toList(),
-            'chord_frequency': message['analysis']?['chord_frequency'] ?? {},
-            'roman_analysis': message['analysis']?['roman_analysis'] ?? {},
-            'progression_pattern': message['analysis']?['patterns']?.first ?? '',
+            'chord_progression': chordHistory.map((c) => c['chord'].toString()).toList(),
+            'roman_progression': chordHistory.map((c) => c['roman']?.toString() ?? '').toList(),
+            'chord_frequency': Map<String, dynamic>.from(message['analysis']?['chord_frequency'] as Map? ?? {}),
+            'roman_analysis': Map<String, dynamic>.from(message['analysis']?['roman_analysis'] as Map? ?? {}),
+            'progression_pattern': (message['analysis']?['patterns'] as List?)?.isNotEmpty == true
+                ? message['analysis']['patterns'][0].toString()
+                : '',
           };
 
           // Show analysis screen

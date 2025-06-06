@@ -46,9 +46,15 @@ class SessionAnalysisScreen extends StatelessWidget {
   }
 
   Widget _buildSessionOverviewCard(BuildContext context) {
-    final totalChords = sessionData['total_chords'] ?? 0;
-    final uniqueChords = sessionData['unique_chords'] ?? 0;
-    final duration = sessionData['duration'] ?? 0.0;
+    final totalChords = (sessionData['total_chords'] ?? 0) is int
+        ? sessionData['total_chords']
+        : int.tryParse(sessionData['total_chords'].toString()) ?? 0;
+    final uniqueChords = (sessionData['unique_chords'] ?? 0) is int
+        ? sessionData['unique_chords']
+        : int.tryParse(sessionData['unique_chords'].toString()) ?? 0;
+    final duration = (sessionData['duration'] ?? 0.0) is double
+        ? sessionData['duration']
+        : double.tryParse(sessionData['duration'].toString()) ?? 0.0;
     
     return Card(
       child: Padding(
@@ -78,9 +84,11 @@ class SessionAnalysisScreen extends StatelessWidget {
   }
 
   Widget _buildKeyDetectionCard(BuildContext context) {
-    final detectedKey = sessionData['detected_key'] ?? 'Unknown';
-    final keyConfidence = sessionData['key_confidence'] ?? 0.0;
-    final diatonicChords = sessionData['diatonic_chords'] as List<String>? ?? [];
+    final detectedKey = sessionData['detected_key']?.toString() ?? 'Unknown';
+    final keyConfidence = (sessionData['key_confidence'] ?? 0.0) is double
+        ? sessionData['key_confidence']
+        : double.tryParse(sessionData['key_confidence'].toString()) ?? 0.0;
+    final diatonicChords = (sessionData['diatonic_chords'] as List<dynamic>?)?.cast<String>() ?? [];
     
     return Card(
       child: Padding(
@@ -144,8 +152,8 @@ class SessionAnalysisScreen extends StatelessWidget {
   }
 
   Widget _buildChordProgressionCard(BuildContext context) {
-    final chordProgression = sessionData['chord_progression'] as List<String>? ?? [];
-    final romanProgression = sessionData['roman_progression'] as List<String>? ?? [];
+    final chordProgression = (sessionData['chord_progression'] as List<dynamic>?)?.cast<String>() ?? [];
+    final romanProgression = (sessionData['roman_progression'] as List<dynamic>?)?.cast<String>() ?? [];
     
     return Card(
       child: Padding(
@@ -213,7 +221,7 @@ class SessionAnalysisScreen extends StatelessWidget {
   }
 
   Widget _buildStatisticsCard(BuildContext context) {
-    final chordFrequency = sessionData['chord_frequency'] as Map<String, dynamic>? ?? {};
+    final chordFrequency = Map<String, dynamic>.from(sessionData['chord_frequency'] as Map? ?? {});
     
     return Card(
       child: Padding(
@@ -231,8 +239,28 @@ class SessionAnalysisScreen extends StatelessWidget {
             if (chordFrequency.isNotEmpty) ...[
               ...chordFrequency.entries.take(5).map((entry) {
                 final chord = entry.key;
-                final count = entry.value['count'] ?? 0;
-                final percentage = entry.value['percentage'] ?? 0.0;
+
+                // Handle different data formats
+                dynamic value = entry.value;
+                int count;
+                double percentage;
+
+                if (value is Map) {
+                  // Format from session analysis
+                  count = (value['count'] ?? 0) is int ? value['count'] : int.tryParse(value['count'].toString()) ?? 0;
+                  var percentageValue = value['percentage'] ?? 0.0;
+                  if (percentageValue is String) {
+                    percentage = double.tryParse(percentageValue) ?? 0.0;
+                  } else {
+                    percentage = (percentageValue as num).toDouble();
+                  }
+                } else {
+                  // Format from backend (just count)
+                  count = (value is int) ? value : int.tryParse(value.toString()) ?? 0;
+                  // Calculate percentage if we have total chords
+                  final totalChords = sessionData['total_chords'] ?? 1;
+                  percentage = (count / totalChords * 100);
+                }
                 
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 8),
@@ -262,7 +290,7 @@ class SessionAnalysisScreen extends StatelessWidget {
                     ],
                   ),
                 );
-              }).toList(),
+              }),
             ] else ...[
               const Text('No statistics available'),
             ],
@@ -273,7 +301,7 @@ class SessionAnalysisScreen extends StatelessWidget {
   }
 
   Widget _buildRomanNumeralCard(BuildContext context) {
-    final romanAnalysis = sessionData['roman_analysis'] as Map<String, dynamic>? ?? {};
+    final romanAnalysis = Map<String, dynamic>.from(sessionData['roman_analysis'] as Map? ?? {});
     
     return Card(
       child: Padding(
@@ -322,7 +350,7 @@ class SessionAnalysisScreen extends StatelessWidget {
                     ],
                   ),
                 );
-              }).toList(),
+              }),
             ] else ...[
               const Text('No roman numeral analysis available'),
             ],
