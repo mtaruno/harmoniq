@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/websocket_service.dart';
@@ -98,14 +97,14 @@ class _HomeScreenState extends State<HomeScreen> {
     _webSocketSubscription?.cancel();
 
     // Set up new subscription
-    _webSocketSubscription = wsService.messageStream.listen((message) {
-      print('🔔 Received WebSocket message: $message'); // Debug log
-      print('🔔 Message type: ${message['type']}'); // Debug log
+    _webSocketSubscription = wsService.messageStream.listen((message) async {
+      print('📥 Received message: $message');
+      
+      final messageType = message['type'] as String? ?? 'unknown';
+      print('🔔 Message type: $messageType'); // Debug log
+      
       if (mounted) {
         setState(() {
-          final messageType = message['type'];
-          print('🔔 Processing message type: $messageType'); // Debug log
-
           switch (messageType) {
             case 'chord_detected':
               print('🎵 Processing chord_detected: ${message['chord']} (confidence: ${message['confidence']})'); // Debug log
@@ -169,52 +168,6 @@ class _HomeScreenState extends State<HomeScreen> {
               _sessionActive = false;
               break;
 
-            case 'session_summary':
-              print('📊 Session summary received with ${message['chord_count']} chords');
-              // Process the session summary data
-              final chordHistory = message['chord_history'] as List<dynamic>? ?? [];
-              print('📊 Chord history from summary: ${chordHistory.length} chords');
-              print('📊 Current _chordHistory length: ${_chordHistory.length}');
-
-              // Always process session summary data (live messages might be missed)
-              if (chordHistory.isNotEmpty) {
-                print('🔄 Processing session summary data');
-                setState(() {
-                  // Clear existing data and use summary data
-                  _chordHistory.clear();
-                  _chordFrequency.clear();
-                  _totalChordsDetected = 0;
-
-                  for (final chordData in chordHistory) {
-                    _chordHistory.add({
-                      'chord': chordData['chord'] ?? '',
-                      'confidence': (chordData['confidence'] ?? 0.0).toDouble(),
-                      'volume': (chordData['volume'] ?? 0.0).toDouble(),
-                      'roman': chordData['roman'] ?? '',
-                      'timestamp': DateTime.now(),
-                    });
-
-                    final chord = chordData['chord'] ?? '';
-                    _chordFrequency[chord] = (_chordFrequency[chord] ?? 0) + 1;
-                    _totalChordsDetected++;
-                  }
-
-                  // Update current chord to the last one
-                  if (chordHistory.isNotEmpty) {
-                    final lastChord = chordHistory.last;
-                    _currentChord = lastChord['chord'] ?? '';
-                    _currentConfidence = (lastChord['confidence'] ?? 0.0).toDouble();
-                    _currentVolume = (lastChord['volume'] ?? 0.0).toDouble();
-                    _currentKey = message['detected_key'] ?? '';
-                    _keyConfidence = 0.9; // High confidence since it's from analysis
-                  }
-
-                  print('🎵 Updated UI with ${_chordHistory.length} chords from summary');
-                  print('🎵 Current chord: $_currentChord, Key: $_currentKey');
-                });
-              }
-              break;
-
             case 'error':
               print('❌ Server error: ${message['message']}');
               break;
@@ -228,6 +181,28 @@ class _HomeScreenState extends State<HomeScreen> {
           _connectionStatus = wsService.isConnected ? 'Connected' : 'Disconnected';
           _isConnected = wsService.isConnected;
         });
+
+        // Handle session summary outside of setState
+        if (messageType == 'session_summary') {
+          try {
+            await _handleSessionSummary(message);
+            if (mounted) {
+              setState(() {
+                _sessionActive = false;
+              });
+            }
+          } catch (e) {
+            print('Error handling session summary: $e');
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Error handling session summary: $e'),
+                  backgroundColor: Colors.red,
+                ),
+              );
+            }
+          }
+        }
       }
     }, onError: (error) {
       print('❌ WebSocket listener error: $error');
@@ -239,12 +214,22 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadRecentSessions() async {
-    final dbService = context.read<DatabaseService>();
-    final sessions = await dbService.getAllSessions(limit: 5);
-    if (mounted) {
+    try {
+      final dbService = context.read<DatabaseService>();
+      final sessions = await dbService.getAllSessions(limit: 5);
       setState(() {
         _recentSessions = sessions;
       });
+    } catch (e) {
+      print('Error loading recent sessions: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error loading sessions: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -279,120 +264,218 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _toggleRecording() async {
+  Future<void> _startRecording() async {
+    if (!_isConnected) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('❌ WebSocket not connected. Connect first!'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     final wsService = context.read<WebSocketService>();
     final audioService = context.read<AudioService>();
     final dbService = context.read<DatabaseService>();
 
-    if (!_isRecording) {
-      // Start chord detection session
-      if (_isConnected) {
-        // Create session ID and start time
-        _currentSessionId = DateTime.now().millisecondsSinceEpoch.toString();
-        _sessionStartTime = DateTime.now();
-
-        // Send start message to WebSocket server
-        wsService.sendMessage({
-          'type': 'start_session',
-          'confidence_threshold': _confidenceThreshold,
-        });
-
-        // Start audio recording with streaming
-        final audioStarted = await audioService.startRecording(streamAudio: true);
-        if (!audioStarted) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Failed to start audio recording'),
-                backgroundColor: Colors.red,
-              ),
-            );
-          }
-          return;
+    try {
+      // Start audio recording with streaming
+      final audioStarted = await audioService.startRecording(streamAudio: true);
+      if (!audioStarted) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Failed to start audio recording'),
+              backgroundColor: Colors.red,
+            ),
+          );
         }
+        return;
+      }
 
-        // Listen to audio stream and send to WebSocket
-        _audioStreamSubscription = audioService.audioStream.listen((audioData) {
-          if (_isRecording && _isConnected) {
-            wsService.sendAudioData(audioData.toList());
-          }
-        });
+      // Start WebSocket session
+      wsService.sendMessage({
+        'type': 'start_session',
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      });
 
-        // Create session in database
-        final sessionTitle = 'Session ${_sessionStartTime!.toString().substring(0, 19)}';
-        await dbService.createSession(
-          id: _currentSessionId!,
-          title: sessionTitle,
-          confidenceThreshold: _confidenceThreshold,
-        );
+      // Create new session in database
+      _currentSessionId = await dbService.createSession(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        title: 'Session ${DateTime.now().toString()}',
+        description: 'Recording session',
+      );
+      _sessionStartTime = DateTime.now();
 
+      setState(() {
+        _isRecording = true;
+        _sessionActive = true;
+        _chordHistory.clear();
+        _chordFrequency.clear();
+        _totalChordsDetected = 0;
+        _keyConfidence = 0.0;
+        _diatonicChords.clear();
+        _progressionPattern = '';
+      });
+
+      // Listen for WebSocket messages
+      _webSocketSubscription = wsService.messageStream.listen((message) async {
+        print('📥 Received message: $message');
+        
+        final messageType = message['type'] as String? ?? 'unknown';
+        print('🔔 Message type: $messageType'); // Debug log
+        
         if (mounted) {
           setState(() {
-            _isRecording = true;
-            _sessionActive = true;
-            _chordHistory.clear();
-            _currentChord = '';
-            _currentKey = '';
-            _detectedPattern = '';
+            switch (messageType) {
+              case 'chord_detected':
+                print('🎵 Processing chord_detected: ${message['chord']} (confidence: ${message['confidence']})'); // Debug log
+                _currentChord = message['chord'] ?? '';
+                _currentConfidence = (message['confidence'] ?? 0.0).toDouble();
+                _currentVolume = (message['volume'] ?? 0.0).toDouble();
+                _currentRoman = message['roman'] ?? '';
+
+                // Add to chord history
+                _chordHistory.add({
+                  'chord': _currentChord,
+                  'confidence': _currentConfidence,
+                  'volume': _currentVolume,
+                  'roman': _currentRoman,
+                  'timestamp': DateTime.now(),
+                });
+
+                // Update analytics
+                _totalChordsDetected++;
+                _chordFrequency[_currentChord] = (_chordFrequency[_currentChord] ?? 0) + 1;
+
+                print('🎵 Updated UI: chord=$_currentChord, total=$_totalChordsDetected, history=${_chordHistory.length}'); // Debug log
+
+                // Keep only last 20 chords for display
+                if (_chordHistory.length > 20) {
+                  _chordHistory.removeAt(0);
+                }
+                break;
+
+              case 'key_detected':
+                _currentKey = message['key'] ?? '';
+                _keyConfidence = (message['confidence'] ?? 0.0).toDouble();
+                _diatonicChords = List<String>.from(message['diatonic_chords'] ?? []);
+                break;
+
+              case 'pattern_detected':
+                _detectedPattern = message['pattern'] ?? '';
+                _progressionPattern = message['progression'] ?? '';
+                break;
+
+              case 'session_started':
+                _sessionActive = true;
+                _chordHistory.clear();
+                _chordFrequency.clear();
+                _totalChordsDetected = 0;
+                _keyConfidence = 0.0;
+                _diatonicChords.clear();
+                _progressionPattern = '';
+                break;
+
+              case 'session_stopped':
+                _sessionActive = false;
+                break;
+
+              case 'transcription':
+                _lastTranscription = message['text'] ?? '';
+                break;
+
+              case 'session_ended':
+                print('🏁 Session ended: ${message['session_id']}');
+                _sessionActive = false;
+                break;
+
+              case 'session_summary':
+                // Handle session summary asynchronously
+                _handleSessionSummary(message).then((_) {
+                  // Update UI state after handling
+                  if (mounted) {
+                    setState(() {
+                      _sessionActive = false;
+                    });
+                  }
+                }).catchError((error) {
+                  print('Error handling session summary: $error');
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Error handling session summary: $error'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                });
+                break;
+            }
+
+            _connectionStatus = wsService.isConnected ? 'Connected' : 'Disconnected';
+            _isConnected = wsService.isConnected;
           });
         }
+      });
 
-        print('Started session: $_currentSessionId');
-      }
-    } else {
-      // Stop chord detection session
-      if (_isConnected) {
-        wsService.sendMessage({
-          'type': 'stop_session',
-        });
-      }
+      // Listen for audio stream
+      _audioStreamSubscription = audioService.audioStream.listen((data) {
+        if (_isRecording && _isConnected) {
+          wsService.sendMessage({
+            'type': 'audio_data',
+            'data': data,
+            'timestamp': DateTime.now().millisecondsSinceEpoch,
+          });
+        }
+      });
 
-      // Stop audio recording and streaming
+    } catch (e) {
+      print('Error starting recording: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error starting recording: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _stopRecording() async {
+    final wsService = context.read<WebSocketService>();
+    final audioService = context.read<AudioService>();
+
+    try {
+      // Stop WebSocket session
+      wsService.sendMessage({
+        'type': 'stop_session',
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      });
+
+      // Stop audio recording
       await audioService.stopRecording();
       await _audioStreamSubscription?.cancel();
       _audioStreamSubscription = null;
 
-      // Save session data to database
-      if (_currentSessionId != null && _sessionStartTime != null) {
-        final sessionDuration = DateTime.now().difference(_sessionStartTime!).inSeconds;
-
-        // Create a summary of the chord progression
-        final chordSummary = _chordHistory.map((chord) => chord['chord']).join(' - ');
-        final description = _chordHistory.isNotEmpty
-            ? 'Chords: $chordSummary${_currentKey.isNotEmpty ? ' | Key: $_currentKey' : ''}'
-            : 'No chords detected';
-
-        // Update session with final data
-        await dbService.updateSession(_currentSessionId!, {
-          'duration': sessionDuration,
-          'description': description,
-          'transcription': chordSummary,
-        });
-
-        // Save individual chord segments
-        for (int i = 0; i < _chordHistory.length; i++) {
-          final chord = _chordHistory[i];
-          await dbService.addTranscriptionSegment(
-            sessionId: _currentSessionId!,
-            text: '${chord['chord']}${chord['roman'] != null ? ' (${chord['roman']})' : ''}',
-            confidence: chord['confidence'] ?? 0.0,
-            startTime: i * 2000, // Approximate 2 seconds per chord
-            endTime: (i + 1) * 2000,
-          );
+      // Wait for session summary before saving
+      bool summaryReceived = false;
+      final summarySubscription = wsService.messageStream.listen((message) {
+        if (message['type'] == 'session_summary') {
+          summaryReceived = true;
         }
+      });
 
-        print('Saved session: $_currentSessionId with ${_chordHistory.length} chords');
-
-        // Show success message
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Session saved with ${_chordHistory.length} chords detected'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
+      // Wait for summary with timeout
+      int attempts = 0;
+      while (!summaryReceived && attempts < 10) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        attempts++;
       }
+
+      await summarySubscription.cancel();
 
       if (mounted) {
         setState(() {
@@ -402,6 +485,16 @@ class _HomeScreenState extends State<HomeScreen> {
           _sessionStartTime = null;
         });
         _loadRecentSessions(); // Refresh sessions list
+      }
+    } catch (e) {
+      print('❌ Error stopping recording: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Error stopping recording: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     }
   }
@@ -413,9 +506,9 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('Harmoniq'),
         actions: [
           IconButton(
-            icon: Icon(_isConnected ? Icons.wifi : Icons.wifi_off),
-            onPressed: _isConnected ? _disconnect : _connectToServer,
-            tooltip: _isConnected ? 'Disconnect' : 'Connect',
+            icon: const Icon(Icons.analytics),
+            onPressed: _showSessionAnalysis,
+            tooltip: 'Show Session Analysis',
           ),
         ],
       ),
@@ -424,7 +517,7 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Connection Section
+            // Connection Status Card
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(16.0),
@@ -432,39 +525,43 @@ class _HomeScreenState extends State<HomeScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Server Connection',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _serverUrlController,
-                      decoration: const InputDecoration(
-                        labelText: 'WebSocket Server URL',
-                        hintText: 'ws://localhost:8000/ws',
-                        border: OutlineInputBorder(),
+                      'Connection Status',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
                       ),
-                      enabled: !_isConnected,
                     ),
                     const SizedBox(height: 8),
                     Row(
                       children: [
                         Icon(
-                          _isConnected ? Icons.circle : Icons.circle_outlined,
+                          _isConnected ? Icons.cloud_done : Icons.cloud_off,
                           color: _isConnected ? Colors.green : Colors.red,
-                          size: 12,
                         ),
                         const SizedBox(width: 8),
                         Text(_connectionStatus),
                       ],
                     ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: _serverUrlController,
+                      decoration: const InputDecoration(
+                        labelText: 'WebSocket Server URL',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    ElevatedButton(
+                      onPressed: _connectToServer,
+                      child: Text(_isConnected ? 'Disconnect' : 'Connect'),
+                    ),
                   ],
                 ),
               ),
             ),
-            
+
             const SizedBox(height: 16),
-            
-            // Confidence Threshold Section
+
+            // Recording Controls Card
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(16.0),
@@ -472,45 +569,22 @@ class _HomeScreenState extends State<HomeScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Confidence Threshold: ${(_confidenceThreshold * 100).toInt()}%',
-                      style: Theme.of(context).textTheme.titleMedium,
+                      'Recording Controls',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                    Slider(
-                      value: _confidenceThreshold,
-                      min: 0.1,
-                      max: 1.0,
-                      divisions: 9,
-                      onChanged: (value) {
-                        setState(() {
-                          _confidenceThreshold = value;
-                        });
-                      },
-                    ),
-                    // Debug Test Buttons
+                    const SizedBox(height: 16),
                     Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: () => _simulateChordDetection(),
-                            child: const Text('🧪 Test UI'),
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: () => _testWebSocketConnection(),
-                            child: const Text('🔗 Test WS'),
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: () => _toggleDemoMode(),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: _demoMode ? Colors.red : Colors.green,
-                              foregroundColor: Colors.white,
-                            ),
-                            child: Text(_demoMode ? '⏹️ Stop' : '🎭 Demo'),
+                        ElevatedButton.icon(
+                          onPressed: _isRecording ? _stopRecording : _startRecording,
+                          icon: Icon(_isRecording ? Icons.stop : Icons.mic),
+                          label: Text(_isRecording ? 'Stop Recording' : 'Start Recording'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _isRecording ? Colors.red : Colors.green,
+                            foregroundColor: Colors.white,
                           ),
                         ),
                       ],
@@ -519,65 +593,23 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ),
-            
+
             const SizedBox(height: 16),
-            
-            // Live Chord Detection Section
-            Card(
+
+            // Live Chord Detection Card
+            if (_sessionActive) Card(
               child: Padding(
                 padding: const EdgeInsets.all(16.0),
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Live Chord Detection',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        GestureDetector(
-                          onTap: _isConnected ? _toggleRecording : null,
-                          child: Container(
-                            width: 60,
-                            height: 60,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: _isRecording
-                                  ? Colors.red
-                                  : (_isConnected ? Theme.of(context).primaryColor : Colors.grey),
-                            ),
-                            child: Icon(
-                              _isRecording ? Icons.stop : Icons.play_arrow,
-                              color: Colors.white,
-                              size: 30,
-                            ),
-                          ),
-                        ),
-                      ],
+                    Text(
+                      'Live Chord Detection',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const SizedBox(height: 16),
-
-                    // Session Status
-                    if (_sessionActive && _sessionStartTime != null)
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(8),
-                        margin: const EdgeInsets.only(bottom: 12),
-                        decoration: BoxDecoration(
-                          color: Colors.blue.shade50,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.blue.shade200),
-                        ),
-                        child: Text(
-                          'Recording Session • Started: ${_sessionStartTime!.toString().substring(11, 19)} • ${_chordHistory.length} chords detected',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Colors.blue.shade700,
-                            fontWeight: FontWeight.w500,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-
                     // Current Chord Display
                     Container(
                       width: double.infinity,
@@ -655,7 +687,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
 
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 16),
 
                     // Key and Pattern Info
                     Row(
@@ -698,7 +730,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   style: Theme.of(context).textTheme.bodySmall,
                                 ),
                                 Text(
-                                  _detectedPattern.isEmpty ? 'Listening...' : _detectedPattern,
+                                  _progressionPattern.isEmpty ? 'Listening...' : _progressionPattern,
                                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                     fontWeight: FontWeight.bold,
                                   ),
@@ -710,201 +742,174 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ],
                     ),
+                  ],
+                ),
+              ),
+            ),
 
-                    if (!_isConnected)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 8.0),
-                        child: Text(
-                          'Connect to server first',
-                          style: TextStyle(color: Colors.red, fontSize: 12),
+            const SizedBox(height: 16),
+
+            // Chord History Card
+            if (_chordHistory.isNotEmpty) Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Recent Chords',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      height: 100,
+                      child: ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: _chordHistory.length,
+                        itemBuilder: (context, index) {
+                          final chord = _chordHistory[index];
+                          final isRecent = index >= _chordHistory.length - 3;
+                          return Container(
+                            margin: const EdgeInsets.only(right: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: isRecent ? Colors.blue.shade100 : Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: isRecent ? Colors.blue : Colors.grey,
+                              ),
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  chord['chord'],
+                                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                    color: isRecent ? Colors.blue.shade700 : Colors.grey.shade700,
+                                  ),
+                                ),
+                                if (chord['roman'] != null && chord['roman'].isNotEmpty)
+                                  Text(
+                                    chord['roman'],
+                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: Colors.blue.shade600,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // Recent Sessions Card
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Recent Sessions',
+                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
+                        IconButton(
+                          icon: const Icon(Icons.refresh),
+                          onPressed: _loadRecentSessions,
+                          tooltip: 'Refresh Sessions',
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    if (_recentSessions.isEmpty)
+                      const Center(
+                        child: Text('No recent sessions'),
+                      )
+                    else
+                      ListView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: _recentSessions.length,
+                        itemBuilder: (context, index) {
+                          final session = _recentSessions[index];
+                          return ListTile(
+                            title: Text(session['title'] ?? 'Untitled Session'),
+                            subtitle: Text(session['description'] ?? 'No description'),
+                            trailing: Text(
+                              '${session['duration'] ?? 0}s',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                            onTap: () async {
+                              if (session['id'] != null) {
+                                await _showSessionAnalysis(session['id']);
+                              }
+                            },
+                          );
+                        },
                       ),
                   ],
                 ),
               ),
             ),
-            
-            const SizedBox(height: 12),
 
-            // Enhanced Chord Progression Analysis
-            if (_chordHistory.isNotEmpty)
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'Chord Progression',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          if (_sessionActive)
-                            ElevatedButton.icon(
-                              onPressed: () => _showSessionAnalysis(),
-                              icon: const Icon(Icons.analytics, size: 16),
-                              label: const Text('Analyze'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.purple,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                textStyle: const TextStyle(fontSize: 12),
-                              ),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
+            const SizedBox(height: 16),
 
-                      // Session Stats Row
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceAround,
-                        children: [
-                          _buildStatChip('Total', '$_totalChordsDetected', Colors.blue),
-                          _buildStatChip('Unique', '${_chordFrequency.length}', Colors.green),
-                          if (_currentKey.isNotEmpty)
-                            _buildStatChip('Key', _currentKey, Colors.orange),
-                          if (_keyConfidence > 0)
-                            _buildStatChip('Confidence', '${(_keyConfidence * 100).toInt()}%', Colors.purple),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-
-                      // Chord Progression Timeline
-                      SizedBox(
-                        height: 60,
-                        child: ListView.builder(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: _chordHistory.length,
-                          itemBuilder: (context, index) {
-                            final chord = _chordHistory[index];
-                            final isRecent = index >= _chordHistory.length - 3;
-                            return Container(
-                              margin: const EdgeInsets.only(right: 8),
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: isRecent ? Colors.blue.shade100 : Colors.grey.shade100,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                  color: isRecent ? Colors.blue : Colors.grey,
-                                ),
-                              ),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    chord['chord'],
-                                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                      fontWeight: FontWeight.bold,
-                                      color: isRecent ? Colors.blue.shade700 : Colors.grey.shade700,
-                                    ),
-                                  ),
-                                  if (chord['roman'] != null && chord['roman'].isNotEmpty)
-                                    Text(
-                                      chord['roman'],
-                                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                        color: Colors.blue.shade600,
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-
-                      // Top Chords
-                      if (_chordFrequency.isNotEmpty) ...[
-                        const SizedBox(height: 12),
-                        Text(
-                          'Most Frequent Chords:',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Wrap(
-                          spacing: 6,
-                          children: (_chordFrequency.entries.toList()
-                                ..sort((a, b) => b.value.compareTo(a.value)))
-                              .take(5)
-                              .map((entry) => Chip(
-                                    label: Text('${entry.key} (${entry.value})'),
-                                    backgroundColor: Colors.green.shade100,
-                                    labelStyle: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.green.shade700,
-                                    ),
-                                  ))
-                              .toList(),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-
-            // Last Transcription
-            if (_lastTranscription.isNotEmpty)
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Last Transcription',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 6),
-                      Text(_lastTranscription),
-                    ],
-                  ),
-                ),
-              ),
-
-            const SizedBox(height: 12),
-            
-            // Recent Sessions
+            // Debug Controls Card
             Card(
               child: Padding(
-                padding: const EdgeInsets.all(12.0),
+                padding: const EdgeInsets.all(16.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      'Recent Sessions',
-                      style: Theme.of(context).textTheme.titleMedium,
+                      'Debug Controls',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                    const SizedBox(height: 8),
-                    _recentSessions.isEmpty
-                        ? const Padding(
-                            padding: EdgeInsets.all(32.0),
-                            child: Center(child: Text('No sessions yet')),
-                          )
-                        : ListView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: _recentSessions.length,
-                            itemBuilder: (context, index) {
-                              final session = _recentSessions[index];
-                              return ListTile(
-                                title: Text(session['title'] ?? 'Untitled'),
-                                subtitle: Text(
-                                  DateTime.fromMillisecondsSinceEpoch(
-                                    session['created_at'],
-                                  ).toString().substring(0, 19),
-                                ),
-                                trailing: Icon(
-                                  session['is_favorite'] == 1
-                                      ? Icons.favorite
-                                      : Icons.favorite_border,
-                                ),
-                              );
-                            },
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () => _simulateChordDetection(),
+                            child: const Text('🧪 Test UI'),
                           ),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () => _testWebSocketConnection(),
+                            child: const Text('🔗 Test WS'),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () => _toggleDemoMode(),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _demoMode ? Colors.red : Colors.green,
+                              foregroundColor: Colors.white,
+                            ),
+                            child: Text(_demoMode ? '⏹️ Stop' : '🎭 Demo'),
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -915,13 +920,13 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildStatChip(String label, String value, Color color) {
+  Widget _buildMetricCard({required String value, required String label, required Color color}) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
+        color: color.withOpacity(0.1),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
+        border: Border.all(color: color.withOpacity(0.3)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1054,42 +1059,194 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  void _showSessionAnalysis() {
-    if (_chordHistory.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No chord data to analyze yet'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
+  Future<void> _showSessionAnalysis([String? sessionId]) async {
+    try {
+      final dbService = context.read<DatabaseService>();
+      
+      if (sessionId == null) {
+        // Show a dialog to select a session
+        final sessions = await dbService.getAllSessions();
+        if (!mounted) return;
+        
+        final selectedSession = await showDialog<Map<String, dynamic>>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Select a Session'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: sessions.length,
+                itemBuilder: (context, index) {
+                  final session = sessions[index];
+                  return ListTile(
+                    title: Text(session['title'] ?? 'Untitled Session'),
+                    subtitle: Text(session['description'] ?? 'No description'),
+                    onTap: () => Navigator.of(context).pop(session),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+        
+        if (selectedSession == null) return;
+        sessionId = selectedSession['id'];
+      }
+
+      final session = await dbService.getSession(sessionId!);
+      final segments = await dbService.getTranscriptionSegments(sessionId!);
+
+      if (session == null) {
+        throw Exception('Session not found');
+      }
+
+      // Convert segments to chord detections format
+      final chordDetections = segments.map((segment) {
+        final text = segment['text'].toString();
+        final chord = text.split(' ')[0]; // Get chord part before (roman)
+        final roman = text.contains('(') 
+            ? text.split('(')[1].split(')')[0] 
+            : null;
+
+        return {
+          'chord': chord,
+          'roman': roman,
+          'confidence': segment['confidence'] ?? 0.0,
+          'timestamp': segment['start_time'] ?? 0,
+        };
+      }).toList();
+
+      // Calculate chord frequency
+      final chordFrequency = <String, int>{};
+      for (final detection in chordDetections) {
+        final chord = detection['chord'] as String;
+        chordFrequency[chord] = (chordFrequency[chord] ?? 0) + 1;
+      }
+
+      // Prepare session data for analysis
+      final sessionData = {
+        'total_chords': chordDetections.length,
+        'unique_chords': chordFrequency.length,
+        'duration': session['duration'] ?? 0.0,
+        'detected_key': session['description']?.toString().split('| Key: ').last ?? 'Unknown',
+        'key_confidence': 0.9, // High confidence since it's from analysis
+        'diatonic_chords': [], // Could be populated from backend
+        'chord_progression': chordDetections.map((c) => c['chord'] as String).toList(),
+        'roman_progression': chordDetections.map((c) => c['roman'] as String? ?? '').toList(),
+        'chord_frequency': chordFrequency.map((k, v) => MapEntry(k, {
+          'count': v,
+          'percentage': (v / chordDetections.length * 100).toStringAsFixed(1),
+        })),
+        'roman_analysis': {}, // Could be populated from backend
+        'progression_pattern': '', // Could be populated from backend
+      };
+
+      if (mounted) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => SessionAnalysisScreen(
+              sessionData: sessionData,
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      print('Error showing session analysis: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error showing session analysis: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
+  }
 
-    // Prepare session data for analysis
-    final sessionData = {
-      'total_chords': _totalChordsDetected,
-      'unique_chords': _chordFrequency.length,
-      'duration': _sessionStartTime != null
-          ? DateTime.now().difference(_sessionStartTime!).inSeconds.toDouble()
-          : 0.0,
-      'detected_key': _currentKey,
-      'key_confidence': _keyConfidence,
-      'diatonic_chords': _diatonicChords,
-      'chord_progression': _chordHistory.map((c) => c['chord'] as String).toList(),
-      'roman_progression': _chordHistory.map((c) => c['roman'] as String? ?? '').toList(),
-      'chord_frequency': _chordFrequency.map((key, value) => MapEntry(key, {
-        'count': value,
-        'percentage': (value / _totalChordsDetected * 100),
-      })),
-      'roman_analysis': <String, dynamic>{}, // Could be enhanced with more analysis
-      'progression_pattern': _progressionPattern,
-    };
+  Future<void> _handleSessionSummary(Map<String, dynamic> message) async {
+    print('📊 Session summary received with ${message['chord_count']} chords');
+    // Process the session summary data
+    final chordHistory = message['chord_history'] as List<dynamic>? ?? [];
+    print('📊 Chord history from summary: ${chordHistory.length} chords');
+    print('📊 Current _chordHistory length: ${_chordHistory.length}');
 
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => SessionAnalysisScreen(sessionData: sessionData),
-      ),
-    );
+    // Always process session summary data (live messages might be missed)
+    if (_currentSessionId != null && _sessionStartTime != null) {
+      final sessionDuration = DateTime.now().difference(_sessionStartTime!).inSeconds;
+      final dbService = context.read<DatabaseService>();
+
+      // Create a summary of the chord progression
+      final chordSummary = chordHistory.isNotEmpty 
+          ? chordHistory.map((chord) => chord['chord']).join(' - ')
+          : 'No chords detected';
+      final description = 'Chords: $chordSummary${_currentKey.isNotEmpty ? ' | Key: $_currentKey' : ''}';
+
+      try {
+        // Update session with final data
+        await dbService.updateSession(_currentSessionId!, {
+          'duration': sessionDuration,
+          'description': description,
+          'transcription': chordSummary,
+        });
+
+        // Save individual chord segments
+        for (int i = 0; i < chordHistory.length; i++) {
+          final chord = chordHistory[i];
+          await dbService.addTranscriptionSegment(
+            sessionId: _currentSessionId!,
+            text: '${chord['chord']}${chord['roman'] != null ? ' (${chord['roman']})' : ''}',
+            confidence: chord['confidence'] ?? 0.0,
+            startTime: i * 2000, // Approximate 2 seconds per chord
+            endTime: (i + 1) * 2000,
+          );
+        }
+
+        print('Saved session: $_currentSessionId with ${chordHistory.length} chords');
+
+        // Show success message
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Session saved with ${chordHistory.length} chords detected'),
+              backgroundColor: Colors.green,
+            ),
+          );
+
+          // Prepare session data for analysis
+          final sessionData = {
+            'total_chords': chordHistory.length,
+            'unique_chords': message['unique_chords'] ?? 0,
+            'duration': sessionDuration.toDouble(),
+            'detected_key': message['detected_key'] ?? '',
+            'key_confidence': 0.9, // High confidence since it's from analysis
+            'diatonic_chords': [], // Could be populated from backend
+            'chord_progression': chordHistory.map((c) => c['chord'] as String).toList(),
+            'roman_progression': chordHistory.map((c) => c['roman'] as String? ?? '').toList(),
+            'chord_frequency': message['analysis']?['chord_frequency'] ?? {},
+            'roman_analysis': message['analysis']?['roman_analysis'] ?? {},
+            'progression_pattern': message['analysis']?['patterns']?.first ?? '',
+          };
+
+          // Show analysis screen
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => SessionAnalysisScreen(sessionData: sessionData),
+            ),
+          );
+        }
+      } catch (e) {
+        print('Error saving session data: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error saving session data: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
   }
 
   @override
