@@ -446,8 +446,7 @@ class ProgressionDetector:
             if all_chords:
                 # Convert to Roman numerals if we have a key
                 if self.current_key:
-                    roman_numerals = [self.chord_to_roman(chord, self.c
-                                                          urrent_key) for chord in all_chords]
+                    roman_numerals = [self.chord_to_roman(chord, self.current_key) for chord in all_chords]
                     print(f"\n📝 Full Progression in {self.current_key}:")
                     print("   " + " → ".join(roman_numerals))
                     
