@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:record/record.dart';
 import 'package:audio_session/audio_session.dart';
@@ -15,6 +16,8 @@ class AudioService {
   bool _isInitialized = false;
   StreamController<Uint8List>? _audioStreamController;
   Timer? _recordingTimer;
+  String? _currentRecordingPath;
+  int _lastReadPosition = 0;
 
   bool get isRecording => _isRecording;
   bool get isInitialized => _isInitialized;
@@ -89,13 +92,18 @@ class AudioService {
 
       // Start recording
       if (outputPath != null) {
+        _currentRecordingPath = outputPath;
         await _recorder.start(config, path: outputPath);
       } else {
         // For streaming, we'll use a temporary file approach
         final tempDir = Directory.systemTemp;
         final tempPath = path.join(tempDir.path, 'temp_audio_${DateTime.now().millisecondsSinceEpoch}.wav');
+        _currentRecordingPath = tempPath;
         await _recorder.start(config, path: tempPath);
       }
+
+      // Reset read position for streaming
+      _lastReadPosition = 0;
 
       _isRecording = true;
 
@@ -127,6 +135,10 @@ class AudioService {
       _recordingTimer?.cancel();
       await _audioStreamController?.close();
       _audioStreamController = null;
+
+      // Reset tracking variables
+      _currentRecordingPath = null;
+      _lastReadPosition = 0;
 
       print('Stopped recording audio: $path');
       return path;
@@ -177,20 +189,68 @@ class AudioService {
 
   /// Start streaming audio data
   void _startAudioStreaming() {
-    // This is a simplified approach - in a real implementation,
-    // you might want to use a more sophisticated streaming method
-    _recordingTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) async {
+    // Use a timer to read actual recorded audio data periodically
+    _recordingTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) async {
       if (!_isRecording || _audioStreamController == null) {
         timer.cancel();
         return;
       }
 
-      // In a real implementation, you would read audio chunks here
-      // For now, this is a placeholder for the streaming functionality
-      // The actual implementation would depend on the specific requirements
-      // and the audio processing pipeline
+      try {
+        // Get current amplitude for monitoring
+        final amplitude = await getAmplitude();
+        print('📊 Current amplitude: $amplitude');
+
+        // Read actual audio data from the recording file
+        final audioChunk = await _readActualAudioData();
+        if (audioChunk != null && audioChunk.isNotEmpty) {
+          print('📤 Sending real audio chunk: ${audioChunk.length} bytes (amplitude: ${amplitude.toStringAsFixed(3)})');
+          _audioStreamController?.add(audioChunk);
+        }
+
+      } catch (e) {
+        print('Error in audio streaming: $e');
+      }
     });
   }
+
+  /// Read actual audio data from the recording file
+  Future<Uint8List?> _readActualAudioData() async {
+    if (_currentRecordingPath == null) {
+      return null;
+    }
+
+    try {
+      final file = File(_currentRecordingPath!);
+      if (!await file.exists()) {
+        return null;
+      }
+
+      // Read the file and get new data since last read
+      final fileBytes = await file.readAsBytes();
+
+      // Skip WAV header (44 bytes) and previously read data
+      final headerSize = 44;
+      final startPosition = math.max(headerSize, _lastReadPosition);
+
+      if (startPosition >= fileBytes.length) {
+        return null; // No new data
+      }
+
+      // Read new audio data
+      final newData = fileBytes.sublist(startPosition);
+      _lastReadPosition = fileBytes.length;
+
+      // Return the new audio data
+      return Uint8List.fromList(newData);
+
+    } catch (e) {
+      print('Error reading audio file: $e');
+      return null;
+    }
+  }
+
+
 
   /// Read audio file as bytes
   Future<Uint8List?> readAudioFile(String filePath) async {
@@ -208,7 +268,9 @@ class AudioService {
 
   /// Dispose resources
   void dispose() {
-    stopRecording();
+    if (_isRecording) {
+      stopRecording();
+    }
     _recorder.dispose();
     _recordingTimer?.cancel();
     _audioStreamController?.close();

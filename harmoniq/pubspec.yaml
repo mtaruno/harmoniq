@@ -41,6 +41,8 @@ dependencies:
   # Audio recording and playback
   record: ^5.1.2
   audio_session: ^0.1.21
+  # Real-time audio streaming
+  flutter_sound: ^9.2.13
 
   # Local database
   sqflite: ^2.4.1

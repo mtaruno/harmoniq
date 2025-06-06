@@ -34,7 +34,7 @@ class HarmoniqApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        Provider<WebSocketService>(create: (_) => WebSocketService()),
+        Provider<WebSocketService>.value(value: WebSocketService()),
         Provider<AudioService>(create: (_) => AudioService()),
         Provider<DatabaseService>(create: (_) => DatabaseService()),
       ],

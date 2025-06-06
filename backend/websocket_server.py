@@ -6,8 +6,11 @@ from typing import Dict, List, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-import threading
+import numpy as np
+import librosa
+from enhanced_chord_detector import ChordDetector
 from live_chord_progression import ProgressionDetector
+from collections import deque
 
 app = FastAPI(title="Harmoniq WebSocket Server")
 
@@ -48,6 +51,81 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+class AudioChordDetector:
+    """Chord detector that processes audio data from WebSocket clients"""
+
+    def __init__(self, confidence_threshold=0.6):
+        self.chord_detector = ChordDetector(confidence_threshold=confidence_threshold)
+        self.audio_buffer = deque(maxlen=8192)  # Buffer for incoming audio
+        self.sample_rate = 16000  # Flutter app sample rate
+        self.on_chord_detected = None
+
+    def process_audio_data(self, audio_bytes):
+        """Process incoming audio data and detect chords"""
+        try:
+            # Convert bytes to numpy array (assuming 16-bit PCM)
+            audio_data = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+            print(f"🎵 Received audio data: {len(audio_data)} samples, buffer size: {len(self.audio_buffer)}")
+
+            # Check audio data range
+            if len(audio_data) > 0:
+                print(f"📊 Audio range: min={np.min(audio_data):.4f}, max={np.max(audio_data):.4f}, mean={np.mean(audio_data):.4f}")
+
+            # Add to buffer
+            self.audio_buffer.extend(audio_data)
+
+            # Process if we have enough data (about 0.5 seconds)
+            if len(self.audio_buffer) >= self.sample_rate // 2:
+                # Get the last 0.5 seconds of audio
+                chunk_size = self.sample_rate // 2
+                audio_chunk = np.array(list(self.audio_buffer)[-chunk_size:])
+
+                # Check if there's enough signal
+                volume = np.sqrt(np.mean(audio_chunk**2))
+                print(f"🔊 Audio volume: {volume:.4f}")
+
+                if volume < 0.01:  # Too quiet
+                    print("🔇 Audio too quiet, skipping...")
+                    return
+
+                # Resample audio to 22kHz to match ChordDetector expectations
+                audio_22k = librosa.resample(audio_chunk, orig_sr=self.sample_rate, target_sr=22050)
+
+                # Extract chroma features using the same method as ChordDetector
+                chroma = librosa.feature.chroma_cqt(
+                    y=audio_22k,
+                    sr=22050,
+                    hop_length=512,
+                    fmin=librosa.note_to_hz('C2')
+                )
+
+                if chroma.size == 0:
+                    print("❌ No chroma features extracted")
+                    return
+
+                # Average chroma over time
+                avg_chroma = np.mean(chroma, axis=1)
+                print(f"🎼 Chroma shape: {chroma.shape}, avg_chroma: {avg_chroma}")
+
+                # Detect chord
+                chord, confidence = self.chord_detector.match_chord(avg_chroma)
+                print(f"🎵 Detected: {chord} (confidence: {confidence:.3f})")
+
+                # Call callback if set
+                if self.on_chord_detected and chord != "Unknown":
+                    print(f"✅ Calling callback for chord: {chord}")
+                    self.on_chord_detected(chord, confidence, volume)
+                else:
+                    print(f"❌ No callback or unknown chord: {chord}")
+
+        except Exception as e:
+            print(f"Error processing audio data: {e}")
+
+    def stop(self):
+        """Stop the audio detector"""
+        self.audio_buffer.clear()
+        self.on_chord_detected = None
+
 class HarmoniqSession:
     def __init__(self, websocket: WebSocket):
         self.websocket = websocket
@@ -57,6 +135,7 @@ class HarmoniqSession:
         self.start_time = None
         self.chord_history = []
         self.confidence_threshold = 0.7
+        self.event_loop = None
         
     async def start_session(self, confidence_threshold: float = 0.7):
         """Start a new chord detection session"""
@@ -71,51 +150,118 @@ class HarmoniqSession:
         self.start_time = datetime.now()
         self.chord_history = []
         self.session_id = int(time.time())
+
+        # Store the current event loop for use in callbacks
+        self.event_loop = asyncio.get_event_loop()
         
-        # Create detector with callback
-        self.detector = ProgressionDetector()
-        
-        # Override the on_chord_detected method to send WebSocket messages
-        original_callback = self.detector.on_chord_detected
-        
+        # Create full progression detector for advanced analysis
+        self.progression_detector = ProgressionDetector()
+        # Override the confidence threshold for mobile audio
+        self.progression_detector.mobile_confidence_threshold = 0.55
+        # Use lower confidence threshold for WebSocket (mobile audio is often noisier)
+        self.audio_detector = AudioChordDetector(confidence_threshold=max(0.5, confidence_threshold * 0.8))
+
+        # Set up callback for chord detection
         def websocket_callback(chord, confidence, volume):
-            # Call original callback for internal processing
-            original_callback(chord, confidence, volume)
-            
-            # Send WebSocket message
-            asyncio.create_task(self._send_chord_detected(chord, confidence, volume))
-            
-            # Check for key detection
-            if self.detector.current_key:
-                asyncio.create_task(self._send_key_detected(
-                    self.detector.current_key, 
-                    self.detector.key_confidence
-                ))
-        
-        self.detector.on_chord_detected = websocket_callback
-        
-        # Start detector in background thread
-        self.detector_thread = threading.Thread(target=self._run_detector)
-        self.detector_thread.daemon = True
+            # Custom progression tracking with lower confidence threshold for mobile audio
+            self._track_chord_progression(chord, confidence, volume)
+
+
+        self.audio_detector.on_chord_detected = websocket_callback
         self.is_active = True
-        self.detector_thread.start()
+
+        # Initialize progression tracking variables
+        self.last_chord = None
+        self.chord_start_time = None
         
         await manager.send_personal_message({
             "type": "session_started",
             "session_id": self.session_id,
             "confidence_threshold": confidence_threshold
         }, self.websocket)
-        
-    def _run_detector(self):
-        """Run the chord detector in a separate thread"""
+
+    def _track_chord_progression(self, chord, confidence, volume):
+        """Custom chord progression tracking with lower confidence threshold"""
+        from datetime import datetime
+        current_time = datetime.now()
+
+        # Track chord changes for progression (lower confidence threshold for mobile)
+        if (chord != self.last_chord and
+            chord != "Unknown" and
+            confidence > 0.55):  # Lower threshold for mobile audio
+
+            if self.last_chord and self.chord_start_time:
+                # Calculate duration of previous chord
+                duration = (current_time - self.chord_start_time).total_seconds()
+                # Update the last entry with duration
+                if self.progression_detector.chord_history:
+                    self.progression_detector.chord_history[-1]['duration'] = duration
+
+            # Add new chord to progression detector's history
+            self.progression_detector.chord_history.append({
+                'chord': chord,
+                'time': current_time,
+                'confidence': confidence,
+                'duration': 0
+            })
+
+            self.last_chord = chord
+            self.chord_start_time = current_time
+
+            print(f"🎼 Added to progression: {chord} (confidence: {confidence:.2f})")
+
+            # Update key detection periodically
+            if len(self.progression_detector.chord_history) % 3 == 0:
+                recent_chords = [entry['chord'] for entry in self.progression_detector.chord_history[-8:]]
+                detected_key, key_confidence = self.progression_detector.detect_key(recent_chords)
+                if detected_key and key_confidence > 0.5:
+                    if self.progression_detector.current_key != detected_key:
+                        self.progression_detector.current_key = detected_key
+                        self.progression_detector.key_confidence = key_confidence
+                        print(f"🗝️  Key detected: {detected_key}")
+
+        # Always send to WebSocket regardless of progression tracking
         try:
-            self.detector.run()
+            if self.event_loop and self.event_loop.is_running():
+                # Send chord detection
+                print(f"📤 Sending chord to WebSocket: {chord} (confidence: {confidence:.2f})")
+                asyncio.run_coroutine_threadsafe(
+                    self._send_chord_detected(chord, confidence, volume), self.event_loop
+                )
+
+                # Send key detection if available
+                if self.progression_detector.current_key:
+                    print(f"📤 Sending key to WebSocket: {self.progression_detector.current_key}")
+                    asyncio.run_coroutine_threadsafe(
+                        self._send_key_detected(
+                            self.progression_detector.current_key,
+                            self.progression_detector.key_confidence
+                        ), self.event_loop
+                    )
+            else:
+                print(f"❌ Event loop not available, chord detected: {chord} (confidence: {confidence:.2f})")
+                print(f"   Event loop: {self.event_loop}")
+                print(f"   Is running: {self.event_loop.is_running() if self.event_loop else 'N/A'}")
         except Exception as e:
-            print(f"Detector error: {e}")
-            asyncio.create_task(manager.send_personal_message({
+            print(f"❌ Error in websocket callback: {e}")
+            print(f"   Chord detected: {chord} (confidence: {confidence:.2f})")
+            import traceback
+            traceback.print_exc()
+        
+    async def process_audio_data(self, audio_data):
+        """Process incoming audio data from client"""
+        if not self.is_active:
+            return
+
+        try:
+            # Process the audio data
+            self.audio_detector.process_audio_data(audio_data)
+        except Exception as e:
+            print(f"Error processing audio data: {e}")
+            await manager.send_personal_message({
                 "type": "error",
-                "message": f"Detector error: {str(e)}"
-            }, self.websocket))
+                "message": f"Audio processing error: {str(e)}"
+            }, self.websocket)
             
     async def _send_chord_detected(self, chord, confidence, volume):
         """Send chord detection message via WebSocket"""
@@ -127,32 +273,37 @@ class HarmoniqSession:
         
         # Get Roman numeral if key is detected
         roman = None
-        if self.detector and self.detector.current_key:
-            roman = self.detector.chord_to_roman(chord, self.detector.current_key)
+        if self.progression_detector.current_key:
+            roman = self.progression_detector.chord_to_roman(chord, self.progression_detector.current_key)
             
-        # Store in history
+        # Store in history (convert numpy types to Python types for JSON serialization)
         chord_data = {
-            "chord": chord,
-            "confidence": confidence,
-            "volume": volume,
-            "timestamp_ms": timestamp_ms,
-            "roman": roman
+            "chord": str(chord),
+            "confidence": float(confidence),
+            "volume": float(volume),
+            "timestamp_ms": int(timestamp_ms),
+            "roman": str(roman) if roman else None
         }
         self.chord_history.append(chord_data)
         
         # Send WebSocket message
-        await manager.send_personal_message({
+        message = {
             "type": "chord_detected",
             **chord_data
-        }, self.websocket)
+        }
+        print(f"📤 Sending WebSocket message: {message}")
+        await manager.send_personal_message(message, self.websocket)
         
     async def _send_key_detected(self, key, confidence):
         """Send key detection message via WebSocket"""
-        await manager.send_personal_message({
+        message = {
             "type": "key_detected",
             "key": key,
-            "confidence": confidence
-        }, self.websocket)
+            "confidence": confidence,
+            "diatonic_chords": self.progression_detector.get_diatonic_chords(key) if self.progression_detector else []
+        }
+        print(f"📤 Sending key detection: {message}")
+        await manager.send_personal_message(message, self.websocket)
         
     async def stop_session(self):
         """Stop the current session"""
@@ -164,9 +315,11 @@ class HarmoniqSession:
             return
             
         self.is_active = False
-        
-        if self.detector:
-            self.detector.stop()
+
+        if self.audio_detector:
+            self.audio_detector.stop()
+        if self.progression_detector:
+            self.progression_detector.stop()
             
         # Calculate session summary
         end_time = datetime.now()
@@ -188,11 +341,17 @@ class HarmoniqSession:
             if chord != "Unknown":
                 analysis["chord_frequency"][chord] = analysis["chord_frequency"].get(chord, 0) + 1
                 
-        # Get Roman numeral progression
-        if self.detector and self.detector.current_key:
+        # Roman numeral progression
+        if self.progression_detector and self.progression_detector.current_key:
             analysis["roman_progression"] = [
-                entry.get("roman", entry["chord"]) 
-                for entry in self.chord_history 
+                entry.get("roman", entry["chord"])
+                for entry in self.chord_history
+                if entry["chord"] != "Unknown"
+            ]
+        else:
+            analysis["roman_progression"] = [
+                entry["chord"]
+                for entry in self.chord_history
                 if entry["chord"] != "Unknown"
             ]
         
@@ -209,7 +368,7 @@ class HarmoniqSession:
             "duration": duration,
             "chord_count": len(self.chord_history),
             "unique_chords": len(unique_chords),
-            "detected_key": self.detector.current_key if self.detector else None,
+            "detected_key": self.progression_detector.current_key if self.progression_detector else None,
             "chord_history": self.chord_history,
             "analysis": analysis
         }, self.websocket)
@@ -255,7 +414,15 @@ async def websocket_endpoint(websocket: WebSocket):
             elif message_type == "update_threshold":
                 threshold = message.get("confidence_threshold", 0.7)
                 await session.update_confidence_threshold(threshold)
-                
+
+            elif message_type == "audio_data":
+                # Handle incoming audio data from client
+                audio_data = message.get("data")
+                if audio_data and session.is_active:
+                    # Convert list of integers back to bytes
+                    audio_bytes = bytes(audio_data)
+                    await session.process_audio_data(audio_bytes)
+
             else:
                 await manager.send_personal_message({
                     "type": "error",

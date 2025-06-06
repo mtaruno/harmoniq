@@ -43,10 +43,20 @@ class WebSocketService {
       _channel!.stream.listen(
         (data) {
           try {
+            print('🔔 Raw WebSocket data received: $data'); // Debug log
             final Map<String, dynamic> message = jsonDecode(data);
+            print('🔔 Parsed WebSocket message: $message'); // Debug log
+
+            // Special logging for chord_detected messages
+            if (message['type'] == 'chord_detected') {
+              print('🎵 CHORD DETECTED MESSAGE: ${message['chord']} (confidence: ${message['confidence']})');
+            }
+
             _messageController?.add(message);
+            print('🔔 Message added to stream controller'); // Debug log
           } catch (e) {
-            print('Error parsing WebSocket message: $e');
+            print('❌ Error parsing WebSocket message: $e');
+            print('❌ Raw data: $data');
           }
         },
         onError: (error) {
